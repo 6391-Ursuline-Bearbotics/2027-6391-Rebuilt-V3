@@ -1,0 +1,157 @@
+// Copyright (c) 2021-2026 Littleton Robotics
+// http://github.com/Mechanical-Advantage
+//
+// Use of this source code is governed by a BSD
+// license that can be found in the LICENSE file
+// at the root directory of this project.
+
+package frc.robot.subsystems.drive;
+
+import com.ctre.phoenix6.configs.CANcoderConfiguration;
+import com.ctre.phoenix6.configs.TalonFXConfiguration;
+import com.ctre.phoenix6.swerve.SwerveModuleConstants;
+import org.wpilib.math.util.MathUtil;
+import org.wpilib.math.controller.PIDController;
+import org.wpilib.math.geometry.Rotation2d;
+import org.wpilib.math.system.plant.DCMotor;
+import org.wpilib.math.system.plant.LinearSystemId;
+import org.wpilib.math.util.Units;
+import org.wpilib.system.Timer;
+import org.wpilib.simulation.DCMotorSim;
+import frc.robot.util.LoggedTunableNumber;
+
+/**
+ * Physics sim implementation of module IO. The sim models are configured using a set of module
+ * constants from Phoenix. Simulation is always based on voltage control.
+ */
+public class ModuleIOSim implements ModuleIO {
+  // Tunable sim PID gains
+  private static final LoggedTunableNumber driveSimKp =
+      new LoggedTunableNumber("Drive/Sim/DriveKP", 0.05);
+  private static final LoggedTunableNumber driveSimKd =
+      new LoggedTunableNumber("Drive/Sim/DriveKD", 0.0);
+  private static final LoggedTunableNumber driveSimKs =
+      new LoggedTunableNumber("Drive/Sim/DriveKS", 0.0);
+  private static final LoggedTunableNumber driveSimKvRot =
+      new LoggedTunableNumber("Drive/Sim/DriveKV", 0.91035); // (volt * secs) / rotation
+  private static final LoggedTunableNumber turnSimKp =
+      new LoggedTunableNumber("Drive/Sim/TurnKP", 8.0);
+  private static final LoggedTunableNumber turnSimKd =
+      new LoggedTunableNumber("Drive/Sim/TurnKD", 0.0);
+
+  private static final DCMotor DRIVE_GEARBOX = DCMotor.getKrakenX60Foc(1);
+  private static final DCMotor TURN_GEARBOX = DCMotor.getKrakenX60Foc(1);
+
+  private final DCMotorSim driveSim;
+  private final DCMotorSim turnSim;
+
+  private boolean driveClosedLoop = false;
+  private boolean turnClosedLoop = false;
+  private PIDController driveController = new PIDController(driveSimKp.get(), 0, driveSimKd.get());
+  private PIDController turnController = new PIDController(turnSimKp.get(), 0, turnSimKd.get());
+  private double driveFFVolts = 0.0;
+  private double driveAppliedVolts = 0.0;
+  private double turnAppliedVolts = 0.0;
+
+  public ModuleIOSim(
+      SwerveModuleConstants<TalonFXConfiguration, TalonFXConfiguration, CANcoderConfiguration>
+          constants) {
+    // Create drive and turn sim models
+    driveSim =
+        new DCMotorSim(
+            LinearSystemId.createDCMotorSystem(
+                DRIVE_GEARBOX, constants.DriveInertia, constants.DriveMotorGearRatio),
+            DRIVE_GEARBOX);
+    turnSim =
+        new DCMotorSim(
+            LinearSystemId.createDCMotorSystem(
+                TURN_GEARBOX, constants.SteerInertia, constants.SteerMotorGearRatio),
+            TURN_GEARBOX);
+
+    // Enable wrapping for turn PID
+    turnController.enableContinuousInput(-Math.PI, Math.PI);
+  }
+
+  @Override
+  public void updateInputs(ModuleIOInputs inputs) {
+    // Update tunable gains
+    LoggedTunableNumber.ifChanged(
+        hashCode(),
+        values -> driveController.setPID(values[0], 0.0, values[1]),
+        driveSimKp,
+        driveSimKd);
+    LoggedTunableNumber.ifChanged(
+        hashCode(),
+        values -> turnController.setPID(values[0], 0.0, values[1]),
+        turnSimKp,
+        turnSimKd);
+
+    // Run closed-loop control
+    if (driveClosedLoop) {
+      driveAppliedVolts =
+          driveFFVolts + driveController.calculate(driveSim.getAngularVelocityRadPerSec());
+    } else {
+      driveController.reset();
+    }
+    if (turnClosedLoop) {
+      turnAppliedVolts = turnController.calculate(turnSim.getAngularPositionRad());
+    } else {
+      turnController.reset();
+    }
+
+    // Update simulation state
+    driveSim.setInputVoltage(MathUtil.clamp(driveAppliedVolts, -12.0, 12.0));
+    turnSim.setInputVoltage(MathUtil.clamp(turnAppliedVolts, -12.0, 12.0));
+    driveSim.update(0.02);
+    turnSim.update(0.02);
+
+    // Update drive inputs
+    inputs.driveConnected = true;
+    inputs.drivePositionRad = driveSim.getAngularPositionRad();
+    inputs.driveVelocityRadPerSec = driveSim.getAngularVelocityRadPerSec();
+    inputs.driveAppliedVolts = driveAppliedVolts;
+    inputs.driveCurrentAmps = Math.abs(driveSim.getCurrentDrawAmps());
+
+    // Update turn inputs
+    inputs.turnConnected = true;
+    inputs.turnEncoderConnected = true;
+    inputs.turnAbsolutePosition = new Rotation2d(turnSim.getAngularPositionRad());
+    inputs.turnPosition = new Rotation2d(turnSim.getAngularPositionRad());
+    inputs.turnVelocityRadPerSec = turnSim.getAngularVelocityRadPerSec();
+    inputs.turnAppliedVolts = turnAppliedVolts;
+    inputs.turnCurrentAmps = Math.abs(turnSim.getCurrentDrawAmps());
+
+    // Update odometry inputs (50Hz because high-frequency odometry in sim doesn't
+    // matter)
+    inputs.odometryTimestamps = new double[] {Timer.getFPGATimestamp()};
+    inputs.odometryDrivePositionsRad = new double[] {inputs.drivePositionRad};
+    inputs.odometryTurnPositions = new Rotation2d[] {inputs.turnPosition};
+  }
+
+  @Override
+  public void setDriveOpenLoop(double output) {
+    driveClosedLoop = false;
+    driveAppliedVolts = output;
+  }
+
+  @Override
+  public void setTurnOpenLoop(double output) {
+    turnClosedLoop = false;
+    turnAppliedVolts = output;
+  }
+
+  @Override
+  public void setDriveVelocity(double velocityRadPerSec) {
+    driveClosedLoop = true;
+    double ks = driveSimKs.get();
+    double kv = 1.0 / Units.rotationsToRadians(1.0 / driveSimKvRot.get());
+    driveFFVolts = ks * Math.signum(velocityRadPerSec) + kv * velocityRadPerSec;
+    driveController.setSetpoint(velocityRadPerSec);
+  }
+
+  @Override
+  public void setTurnPosition(Rotation2d rotation) {
+    turnClosedLoop = true;
+    turnController.setSetpoint(rotation.getRadians());
+  }
+}
