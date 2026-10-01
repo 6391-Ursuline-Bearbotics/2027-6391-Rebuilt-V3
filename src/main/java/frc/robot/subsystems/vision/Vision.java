@@ -17,7 +17,7 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.numbers.N1;
 import org.wpilib.math.numbers.N3;
 import org.wpilib.util.Alert;
-import org.wpilib.util.Alert.AlertType;
+import org.wpilib.util.Alert.Level;
 import org.wpilib.system.Timer;
 import org.wpilib.command3.Mechanism;
 import org.wpilib.command3.Scheduler;
@@ -26,7 +26,7 @@ import java.util.LinkedList;
 import java.util.List;
 import org.littletonrobotics.junction.Logger;
 
-public class Vision extends Mechanism {
+public class Vision implements Mechanism {
   private final VisionConsumer consumer;
   private final VisionIO[] io;
   private final VisionIOInputsAutoLogged[] inputs;
@@ -51,8 +51,7 @@ public class Vision extends Mechanism {
     this.disconnectedAlerts = new Alert[io.length];
     for (int i = 0; i < inputs.length; i++) {
       disconnectedAlerts[i] =
-          new Alert(
-              "Vision camera " + Integer.toString(i) + " is disconnected.", AlertType.kWarning);
+          new Alert("Vision camera " + Integer.toString(i) + " is disconnected.", "Vision camera " + Integer.toString(i) + " is disconnected.", Level.MEDIUM);
     }
 
     Scheduler.getDefault().addPeriodic(this::periodic);
@@ -73,7 +72,7 @@ public class Vision extends Mechanism {
    * IDs only appear in inputs on the loop cycles where fresh NT data arrives.
    */
   public boolean hasTagsInView() {
-    return (Timer.getFPGATimestamp() - lastTagSeenTimestamp) < 0.5;
+    return (Timer.getTimestamp() - lastTagSeenTimestamp) < 0.5;
   }
 
   /** Returns true if at least one camera is currently reporting as connected. */
@@ -201,7 +200,7 @@ public class Vision extends Mechanism {
           robotPosesRejected.toArray(new Pose3d[0]));
       // Refresh tag-seen timestamp whenever this camera has fresh tag data
       if (inputs[cameraIndex].tagIds.length > 0) {
-        lastTagSeenTimestamp = Timer.getFPGATimestamp();
+        lastTagSeenTimestamp = Timer.getTimestamp();
       }
 
       allTagPoses.addAll(tagPoses);

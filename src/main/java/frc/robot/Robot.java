@@ -124,7 +124,7 @@ public class Robot extends LoggedRobot {
     // continue until interrupted by another command, remove
     // this line or comment it out.
     if (autonomousCommand != null) {
-      autonomousCommand.cancel();
+      Scheduler.getDefault().cancel(autonomousCommand);
     }
     robotContainer.teleopInit();
   }
@@ -135,14 +135,14 @@ public class Robot extends LoggedRobot {
 
   /** This function is called once when test mode is enabled. */
   @Override
-  public void testInit() {
+  public void utilityInit() {
     // Cancels all running commands at the start of test mode.
     Scheduler.getDefault().cancelAll();
   }
 
   /** This function is called periodically during test mode. */
   @Override
-  public void testPeriodic() {}
+  public void utilityPeriodic() {}
 
   /** This function is called once when the robot is first started up. */
   @Override

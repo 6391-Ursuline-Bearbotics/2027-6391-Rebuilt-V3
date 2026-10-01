@@ -1,8 +1,10 @@
 package frc.robot;
 
-import choreo.auto.AutoFactory;
-import choreo.auto.AutoRoutine;
-import choreo.auto.AutoTrajectory;
+import frc.robot.util.V3Commands;
+
+import frc.robot.auto.AutoFactory;
+import frc.robot.auto.AutoRoutine;
+import frc.robot.auto.AutoTrajectory;
 import choreo.util.ChoreoAllianceFlipUtil;
 import org.wpilib.math.util.MathUtil;
 import org.wpilib.math.controller.ProfiledPIDController;
@@ -11,16 +13,16 @@ import org.wpilib.math.filter.Debouncer.DebounceType;
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.kinematics.ChassisSpeeds;
+import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.trajectory.TrapezoidProfile;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.driverstation.DriverStation;
-import org.wpilib.driverstation.DriverStation.Alliance;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.system.Timer;
-import org.wpilib.smartdashboard.SmartDashboard;
-// TODO: Migrate Commands.sequence/parallel/runOnce/run/deadline/defer/waitSeconds/waitUntil
-//   patterns from command2 to command3 once Choreo releases a 2027-compatible vendordep.
-//   Until then, this file cannot compile (Choreo dependency missing) regardless of command version.
+import org.wpilib.tunable.Tunables;
+// Migration pending: Choreo Alpha 3's autonomous APIs use Commands v2,
+// while this project's command code currently uses Commands v3.
 import org.wpilib.command3.Command;
 import frc.robot.subsystems.drive.Drive;
 import frc.robot.subsystems.indexer.Indexer;
@@ -116,8 +118,8 @@ public class AutoRoutines {
         .active()
         .onTrue(
             factory
-                .resetOdometry(() -> Optional.of(new Pose2d(3.559, 4.0296, Rotation2d.kZero)))
-                .andThen(Commands.print("Odometry reset to start position")));
+                .resetOdometry(() -> Optional.of(new Pose2d(3.559, 4.0296, Rotation2d.ZERO)))
+                .andThen(V3Commands.print("Odometry reset to start position")).withAutomaticName());
 
     return routine;
   }
@@ -129,7 +131,7 @@ public class AutoRoutines {
     AutoTrajectory depotCycle = routine.trajectory("DepotCycle");
 
     // When the routine begins, reset odometry and start the first trajectory (1)
-    routine.active().onTrue(Commands.sequence(depotCycle.resetOdometry(), depotCycle.cmd()));
+    routine.active().onTrue(V3Commands.sequence(depotCycle.resetOdometry(), depotCycle.cmd()));
 
     return routine;
   }
@@ -141,7 +143,7 @@ public class AutoRoutines {
     AutoTrajectory depotCycle = routine.trajectory("DepotInside");
 
     // When the routine begins, reset odometry and start the first trajectory (1)
-    routine.active().onTrue(Commands.sequence(depotCycle.resetOdometry(), depotCycle.cmd()));
+    routine.active().onTrue(V3Commands.sequence(depotCycle.resetOdometry(), depotCycle.cmd()));
 
     return routine;
   }
@@ -214,30 +216,30 @@ public class AutoRoutines {
     routine
         .active()
         .onTrue(
-            Commands.sequence(
+            V3Commands.sequence(
                 // Seed odometry from bump trajectory start
                 bump.resetOdometry(),
 
                 // Deploy intake before crossing bump
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
 
                 // Cross the bump via Choreo trajectory
                 bump.cmd(),
 
                 // PID to single pass trajectory start
-                sprintToPose(singlePass.getInitialPose().orElse(new Pose2d())).withTimeout(3.0),
+                sprintToPose(singlePass.getInitialPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(3.0)),
 
                 // Run single pass trajectory with intake collecting balls
                 singlePass.cmd(),
 
                 // Retract intake, spin up shooter, and return over the bump.
                 // The shooter has the full bump-return transit time to reach setpoint.
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
-                Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
+                V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
                 bumpReturn.cmd(),
 
                 // Correct positional error introduced by bump crossing (same as Shoot First auto)
-                sprintToPose(bumpReturn.getFinalPose().orElse(new Pose2d())).withTimeout(2.0),
+                sprintToPose(bumpReturn.getFinalPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(2.0)),
 
                 // Now on the alliance side: drive toward depot at 0.5 m/s while shooting.
                 // Three branches run in parallel until auto ends:
@@ -245,25 +247,25 @@ public class AutoRoutines {
                 //   2. Feed: wait for shooter setpoint, then own the indexer in FEED mode
                 //   3. Intake: jostle balls (periodic rehome) until within ~2m of the depot,
                 //      then deploy to collect staged balls -- mutually exclusive with jostling
-                Commands.parallel(
+                V3Commands.parallel(
                     driveTowardDepotAimingAtHub(0.5),
-                    Commands.sequence(
-                        Commands.waitUntil(() -> shooter.isAtSetpoint()), indexer.feedCommand()),
-                    Commands.sequence(
+                    V3Commands.sequence(
+                        V3Commands.waitUntil(() -> shooter.isAtSetpoint()), indexer.feedCommand()),
+                    V3Commands.sequence(
                         intake
                             .periodicAutoRehomeCommand()
                             .until(
                                 () -> {
                                   boolean isRed =
-                                      DriverStation.getAlliance().isPresent()
-                                          && DriverStation.getAlliance().get() == Alliance.Red;
+                                      MatchState.getAlliance().isPresent()
+                                          && MatchState.getAlliance().get() == Alliance.RED;
                                   return drive
                                           .getPose()
                                           .getTranslation()
                                           .getDistance(FieldConstants.getDepotCenter(isRed))
                                       < 2.0;
-                                }),
-                        Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE))))));
+                                }).withAutomaticName(),
+                        V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE))))));
 
     return routine;
   }
@@ -282,12 +284,12 @@ public class AutoRoutines {
     routine
         .active()
         .onTrue(
-            Commands.sequence(
-                Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
-                aimBackAtHub().withTimeout(1.5),
-                Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-                intake.periodicAutoRehomeCommand().withTimeout(10.0),
-                Commands.runOnce(
+            V3Commands.sequence(
+                V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
+                aimBackAtHub().withTimeout(org.wpilib.units.Units.Seconds.of(1.5)),
+                V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+                intake.periodicAutoRehomeCommand().withTimeout(org.wpilib.units.Units.Seconds.of(10.0)),
+                V3Commands.runOnce(
                     () -> {
                       shooter.setGoal(Shooter.Goal.IDLE);
                       indexer.setGoal(Indexer.Goal.IDLE);
@@ -375,52 +377,52 @@ public class AutoRoutines {
     Timer autoTimer = new Timer();
 
     // Deploy intake at the "Intake" waypoint on the disrupt trajectory
-    disruptTraj.atTime("Intake").onTrue(Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
+    disruptTraj.atTime("Intake").onTrue(V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
     // Spin up shooter at the "Spin" waypoint (before crossing bump)
-    disruptTraj.atTime("Spin").onTrue(Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
+    disruptTraj.atTime("Spin").onTrue(V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
 
     routine
         .active()
         .onTrue(
-            Commands.sequence(
-                Commands.runOnce(() -> autoTimer.restart()),
+            V3Commands.sequence(
+                V3Commands.runOnce(() -> autoTimer.restart()),
                 disruptTraj.resetOdometry(),
 
                 // Rush out; intake and shooter activate via waypoint events
                 disruptTraj.cmd(),
 
                 // Retract intake for shooting
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
 
                 // Static shot: wait until aimed for 0.5s, feed for at least shootDurationSecs,
                 // then keep shooting until bumpRushAutoTimeSecs have elapsed since routine start.
-                Commands.deadline(
-                    Commands.sequence(
-                        Commands.defer(
+                V3Commands.deadline(
+                    V3Commands.sequence(
+                        V3Commands.defer(
                             () -> {
-                              Debouncer aimDebouncer = new Debouncer(0.5, DebounceType.kRising);
-                              return Commands.waitUntil(
+                              Debouncer aimDebouncer = new Debouncer(0.5, DebounceType.RISING);
+                              return V3Commands.waitUntil(
                                       () -> aimDebouncer.calculate(isAimedAtHub()))
-                                  .withTimeout(2.0);
+                                  .withTimeout(org.wpilib.units.Units.Seconds.of(2.0));
                             },
                             Set.of()),
-                        Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-                        Commands.defer(
-                            () -> Commands.waitSeconds(shootDurationSecs.get()), Set.of()),
-                        Commands.waitUntil(() -> autoTimer.get() >= bumpRushAutoTimeSecs.get())),
+                        V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+                        V3Commands.defer(
+                            () -> V3Commands.waitSeconds(shootDurationSecs.get()), Set.of()),
+                        V3Commands.waitUntil(() -> autoTimer.get() >= bumpRushAutoTimeSecs.get())),
                     aimBackAtHubWithVisionCreep(),
                     intake.periodicAutoRehomeCommand()),
 
                 // Stop shooter and indexer
-                Commands.runOnce(
+                V3Commands.runOnce(
                     () -> {
                       shooter.setGoal(Shooter.Goal.IDLE);
                       indexer.setGoal(Indexer.Goal.IDLE);
                     }),
 
                 // Rush over bump with intake deployed
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
-                sprintToPose(bumpTraj.getInitialPose().orElse(new Pose2d())).withTimeout(3.0),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
+                sprintToPose(bumpTraj.getInitialPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(3.0)),
                 bumpTraj.cmd()));
 
     return routine;
@@ -441,13 +443,13 @@ public class AutoRoutines {
     AutoTrajectory followTraj = followFactory.apply(routine);
     AutoTrajectory gatherTraj = gatherFactory.apply(routine);
 
-    followTraj.atTime("Intake").onTrue(Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
-    followTraj.atTime("Spin").onTrue(Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
+    followTraj.atTime("Intake").onTrue(V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
+    followTraj.atTime("Spin").onTrue(V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
 
     routine
         .active()
         .onTrue(
-            Commands.sequence(
+            V3Commands.sequence(
                 followTraj.resetOdometry(),
 
                 // Shoot preloaded ball before driving out; delay runs in parallel so it doesn't
@@ -455,17 +457,17 @@ public class AutoRoutines {
                 shootFirstPreloadCommand(),
 
                 // Lower hood to 26° before entering trench (first pass)
-                Commands.runOnce(() -> shooter.setHoodAngle(26.0)),
-                Commands.waitSeconds(1.0),
+                V3Commands.runOnce(() -> shooter.setHoodAngle(26.0)),
+                V3Commands.waitSeconds(1.0),
 
                 // Follow trajectory; intake and shooter activate via waypoint events
                 followTraj.cmd(),
 
                 // Retract intake for shooting
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
 
                 // Sprint to staging position with back of robot aimed at hub
-                Commands.defer(
+                V3Commands.defer(
                     () -> {
                       boolean isRed = ChoreoAllianceFlipUtil.shouldFlip();
                       Translation2d staging =
@@ -478,36 +480,36 @@ public class AutoRoutines {
                               + Math.PI
                               + Math.toRadians(ShooterConstants.shooterHeadingOffsetDegrees);
                       return sprintToPose(new Pose2d(staging, new Rotation2d(aimAngle)))
-                          .withTimeout(2.0);
+                          .withTimeout(org.wpilib.units.Units.Seconds.of(2.0));
                     },
                     Set.of(drive)),
 
                 // Static shoot from staging position
-                Commands.deadline(
-                    Commands.sequence(
-                        Commands.defer(
+                V3Commands.deadline(
+                    V3Commands.sequence(
+                        V3Commands.defer(
                             () -> {
-                              Debouncer aimDebouncer = new Debouncer(0.5, DebounceType.kRising);
-                              return Commands.waitUntil(
+                              Debouncer aimDebouncer = new Debouncer(0.5, DebounceType.RISING);
+                              return V3Commands.waitUntil(
                                       () -> aimDebouncer.calculate(isAimedAtHub()))
-                                  .withTimeout(2.0);
+                                  .withTimeout(org.wpilib.units.Units.Seconds.of(2.0));
                             },
                             Set.of()),
-                        Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-                        Commands.defer(
-                            () -> Commands.waitSeconds(shootDurationSecs.get()), Set.of())),
+                        V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+                        V3Commands.defer(
+                            () -> V3Commands.waitSeconds(shootDurationSecs.get()), Set.of())),
                     aimBackAtHubWithVisionCreep(),
                     intake.periodicAutoRehomeCommand()),
 
                 // Stop indexer before gather pass
-                Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.IDLE)),
+                V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.IDLE)),
 
                 // Lower hood to 26° before entering trench for gather pass
-                Commands.runOnce(() -> shooter.setHoodAngle(26.0)),
-                Commands.waitSeconds(1.0),
+                V3Commands.runOnce(() -> shooter.setHoodAngle(26.0)),
+                V3Commands.waitSeconds(1.0),
 
                 // PID to gather path start so second pass is consistent
-                sprintToPose(gatherTraj.getInitialPose().orElse(new Pose2d())).withTimeout(3.0),
+                sprintToPose(gatherTraj.getInitialPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(3.0)),
 
                 // Gather: run OutpostStagingGather, deploying intake at its "Intake" marker
                 trenchGatherRun(gatherTraj)));
@@ -529,53 +531,53 @@ public class AutoRoutines {
     Timer autoTimer = new Timer();
 
     // Deploy intake at the "Intake" waypoint marker
-    pointsTraj.atTime("Intake").onTrue(Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
+    pointsTraj.atTime("Intake").onTrue(V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
 
     // Spin up shooter at the "Spin" waypoint (before crossing bump)
-    pointsTraj.atTime("Spin").onTrue(Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
+    pointsTraj.atTime("Spin").onTrue(V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
 
     routine
         .active()
         .onTrue(
-            Commands.sequence(
-                Commands.runOnce(() -> autoTimer.restart()),
+            V3Commands.sequence(
+                V3Commands.runOnce(() -> autoTimer.restart()),
                 pointsTraj.resetOdometry(),
 
                 // Follow Points trajectory; intake deploys at "Intake", shooter spins at "Spin"
                 pointsTraj.cmd(),
 
                 // Retract intake for static shot
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
 
                 // Static shot: wait until aimed for 0.5s, feed for at least shootDurationSecs,
                 // then keep shooting until bumpRushAutoTimeSecs have elapsed since routine start.
-                Commands.deadline(
-                    Commands.sequence(
-                        Commands.defer(
+                V3Commands.deadline(
+                    V3Commands.sequence(
+                        V3Commands.defer(
                             () -> {
-                              Debouncer aimDebouncer = new Debouncer(0.5, DebounceType.kRising);
-                              return Commands.waitUntil(
+                              Debouncer aimDebouncer = new Debouncer(0.5, DebounceType.RISING);
+                              return V3Commands.waitUntil(
                                       () -> aimDebouncer.calculate(isAimedAtHub()))
-                                  .withTimeout(2.0);
+                                  .withTimeout(org.wpilib.units.Units.Seconds.of(2.0));
                             },
                             Set.of()),
-                        Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-                        Commands.defer(
-                            () -> Commands.waitSeconds(shootDurationSecs.get()), Set.of()),
-                        Commands.waitUntil(() -> autoTimer.get() >= bumpRushAutoTimeSecs.get())),
+                        V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+                        V3Commands.defer(
+                            () -> V3Commands.waitSeconds(shootDurationSecs.get()), Set.of()),
+                        V3Commands.waitUntil(() -> autoTimer.get() >= bumpRushAutoTimeSecs.get())),
                     aimBackAtHubWithVisionCreep(),
                     intake.periodicAutoRehomeCommand()),
 
                 // Stop shooter and indexer
-                Commands.runOnce(
+                V3Commands.runOnce(
                     () -> {
                       shooter.setGoal(Shooter.Goal.IDLE);
                       indexer.setGoal(Indexer.Goal.IDLE);
                     }),
 
                 // Rush over bump with intake deployed
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
-                sprintToPose(bumpTraj.getInitialPose().orElse(new Pose2d())).withTimeout(3.0),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
+                sprintToPose(bumpTraj.getInitialPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(3.0)),
                 bumpTraj.cmd()));
 
     return routine;
@@ -588,18 +590,17 @@ public class AutoRoutines {
    * shoving them away.
    */
   private Command trenchGatherRun(AutoTrajectory gatherTraj) {
-    gatherTraj.atTime("Intake").onTrue(Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
-    return Commands.deadline(
+    gatherTraj.atTime("Intake").onTrue(V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)));
+    return V3Commands.finallyDo(V3Commands.deadline(
             gatherTraj.cmd(),
-            Commands.run(
+            V3Commands.run(
                 () -> {
                   if (intake.getRollerStatorCurrentAmps() > gatherClumpCurrentAmps.get()) {
                     drive.setTrajectorySpeedCap(gatherSlowSpeedMps.get());
                   } else {
                     drive.clearTrajectorySpeedCap();
                   }
-                }))
-        .finallyDo(interrupted -> drive.clearTrajectorySpeedCap());
+                })), interrupted -> drive.clearTrajectorySpeedCap());
   }
 
   private static final double kTrenchAimToleranceRad = Math.toRadians(4.5);
@@ -621,12 +622,12 @@ public class AutoRoutines {
     AutoTrajectory bumpReturn = routine.trajectory(bumpReturnTrajName);
 
     // Build shoot-first prefix if needed
-    Command shootFirstSequence = shootFirst ? shootFirstPreloadCommand() : Commands.none();
+    Command shootFirstSequence = shootFirst ? shootFirstPreloadCommand() : V3Commands.none();
 
     routine
         .active()
         .onTrue(
-            Commands.sequence(
+            V3Commands.sequence(
                 // Seed odometry from bump trajectory start
                 bump.resetOdometry(),
 
@@ -634,50 +635,50 @@ public class AutoRoutines {
                 shootFirstSequence,
 
                 // Deploy intake before crossing bump
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
 
                 // Cross the bump via Choreo trajectory
                 bump.cmd(),
 
                 // PID to double pass trajectory start
-                sprintToPose(doublePass.getInitialPose().orElse(new Pose2d())).withTimeout(3.0),
+                sprintToPose(doublePass.getInitialPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(3.0)),
 
                 // Run double pass trajectory
                 doublePass.cmd(),
 
                 // Spin up shooter (auto-tracks RPM/hood angle from distance LUT)
-                Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
+                V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
 
                 // Retract intake before crossing back over the bump
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.IDLE)),
 
                 // PID to bump return trajectory start
-                sprintToPose(bumpReturn.getInitialPose().orElse(new Pose2d())).withTimeout(3.0),
+                sprintToPose(bumpReturn.getInitialPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(3.0)),
 
                 // Cross back over bump via Choreo trajectory
                 bumpReturn.cmd(),
 
                 // Sprint to final shooting position after bump (corrects positional error from bump
                 // crossing)
-                sprintToPose(bumpReturn.getFinalPose().orElse(new Pose2d())).withTimeout(2.0),
+                sprintToPose(bumpReturn.getFinalPose().orElse(new Pose2d())).withTimeout(org.wpilib.units.Units.Seconds.of(2.0)),
 
                 // Aim at hub while feeding/shooting. If no tags are visible (odometry may have
                 // drifted over the bump), creep toward alliance wall until vision is restored.
-                Commands.deadline(
-                    Commands.sequence(
-                        Commands.waitSeconds(1.0),
-                        Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-                        intake.periodicAutoRehomeCommand().withTimeout(10.0)),
+                V3Commands.deadline(
+                    V3Commands.sequence(
+                        V3Commands.waitSeconds(1.0),
+                        V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+                        intake.periodicAutoRehomeCommand().withTimeout(org.wpilib.units.Units.Seconds.of(10.0))),
                     aimBackAtHubWithVisionCreep()),
 
                 // Stop shooter and indexer, then rush back over the bump toward the middle of the
                 // field with intake deployed to pick up any staged balls along the way
-                Commands.runOnce(
+                V3Commands.runOnce(
                     () -> {
                       shooter.setGoal(Shooter.Goal.IDLE);
                       indexer.setGoal(Indexer.Goal.IDLE);
                     }),
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
                 bump.cmd()));
 
     return routine;
@@ -692,15 +693,15 @@ public class AutoRoutines {
     AutoTrajectory safeTraj = routine.trajectory("Safe");
 
     // Build shoot-first prefix if needed
-    Command shootFirstSequence = shootFirst ? shootFirstPreloadCommand() : Commands.none();
+    Command shootFirstSequence = shootFirst ? shootFirstPreloadCommand() : V3Commands.none();
 
     // Spin up shooter on the "Shoot" event marker during trajectory
-    safeTraj.atTime("Shoot").onTrue(Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
+    safeTraj.atTime("Shoot").onTrue(V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)));
 
     routine
         .active()
         .onTrue(
-            Commands.sequence(
+            V3Commands.sequence(
                 // Seed odometry from trajectory start
                 safeTraj.resetOdometry(),
 
@@ -708,20 +709,20 @@ public class AutoRoutines {
                 shootFirstSequence,
 
                 // Deploy intake at beginning of trajectory
-                Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
+                V3Commands.runOnce(() -> intake.setGoal(Intake.Goal.INTAKE)),
 
                 // Follow the Safe trajectory
                 safeTraj.cmd(),
 
                 // Fine-tune aim (back at hub) before shooting
-                aimBackAtHub().withTimeout(1.0),
+                aimBackAtHub().withTimeout(org.wpilib.units.Units.Seconds.of(1.0)),
 
                 // Feed and shoot for remaining time
-                Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-                intake.periodicAutoRehomeCommand().withTimeout(10.0),
+                V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+                intake.periodicAutoRehomeCommand().withTimeout(org.wpilib.units.Units.Seconds.of(10.0)),
 
                 // Cleanup
-                Commands.runOnce(
+                V3Commands.runOnce(
                     () -> {
                       shooter.setGoal(Shooter.Goal.IDLE);
                       indexer.setGoal(Indexer.Goal.IDLE);
@@ -745,12 +746,12 @@ public class AutoRoutines {
         new ProfiledPIDController(5.0, 0, 0.4, new TrapezoidProfile.Constraints(8.0, 20.0));
     headingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    return Commands.run(
+    return V3Commands.beforeStarting(V3Commands.run(
             () -> {
               Pose2d current = drive.getPose();
               Translation2d toTarget = target.getTranslation().minus(current.getTranslation());
               double distance = toTarget.getNorm();
-              Rotation2d direction = toTarget.getAngle();
+              Rotation2d direction = toTarget.getAngle().orElse(Rotation2d.ZERO);
 
               // Full speed, decelerate in last 0.5m
               double speed =
@@ -761,18 +762,14 @@ public class AutoRoutines {
                       current.getRotation().getRadians(), target.getRotation().getRadians());
 
               drive.runVelocity(
-                  ChassisSpeeds.fromFieldRelativeSpeeds(
-                      direction.getCos() * speed,
-                      direction.getSin() * speed,
-                      omega,
-                      current.getRotation()));
+                  new ChassisVelocities(direction.getCos() * speed, direction.getSin() * speed, omega).toRobotRelative(current.getRotation()));
             },
             drive)
-        .beforeStarting(() -> headingController.reset(drive.getRotation().getRadians()))
+        , () -> headingController.reset(drive.getRotation().getRadians()))
         .until(
             () ->
                 drive.getPose().getTranslation().getDistance(target.getTranslation())
-                    < exitDistanceMeters);
+                    < exitDistanceMeters).withAutomaticName();
   }
 
   /**
@@ -785,12 +782,12 @@ public class AutoRoutines {
         new ProfiledPIDController(5.0, 0, 0.4, new TrapezoidProfile.Constraints(8.0, 20.0));
     headingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    return Commands.run(
+    return V3Commands.beforeStarting(V3Commands.run(
             () -> {
               Pose2d current = drive.getPose();
               boolean isRed =
-                  DriverStation.getAlliance().isPresent()
-                      && DriverStation.getAlliance().get() == Alliance.Red;
+                  MatchState.getAlliance().isPresent()
+                      && MatchState.getAlliance().get() == Alliance.RED;
 
               // Rotation: keep back of robot aimed at hub
               Translation2d hubCenter = FieldConstants.getHubCenter(isRed);
@@ -809,14 +806,10 @@ public class AutoRoutines {
               double driveAngle = Math.atan2(toDepot.getY(), toDepot.getX());
 
               drive.runVelocity(
-                  ChassisSpeeds.fromFieldRelativeSpeeds(
-                      Math.cos(driveAngle) * speedMps,
-                      Math.sin(driveAngle) * speedMps,
-                      omega,
-                      current.getRotation()));
+                  new ChassisVelocities(Math.cos(driveAngle) * speedMps, Math.sin(driveAngle) * speedMps, omega).toRobotRelative(current.getRotation()));
             },
             drive)
-        .beforeStarting(() -> headingController.reset(drive.getRotation().getRadians()));
+        , () -> headingController.reset(drive.getRotation().getRadians()));
   }
 
   /**
@@ -829,12 +822,12 @@ public class AutoRoutines {
         new ProfiledPIDController(5.0, 0, 0.4, new TrapezoidProfile.Constraints(8.0, 20.0));
     headingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    return Commands.run(
+    return V3Commands.beforeStarting(V3Commands.run(
             () -> {
               Pose2d current = drive.getPose();
               boolean isRed =
-                  DriverStation.getAlliance().isPresent()
-                      && DriverStation.getAlliance().get() == Alliance.Red;
+                  MatchState.getAlliance().isPresent()
+                      && MatchState.getAlliance().get() == Alliance.RED;
 
               // Heading: keep back of robot aimed at hub
               Translation2d hubCenter = FieldConstants.getHubCenter(isRed);
@@ -871,11 +864,11 @@ public class AutoRoutines {
               }
 
               drive.runVelocity(
-                  ChassisSpeeds.fromFieldRelativeSpeeds(vx, vy, omega, current.getRotation()));
+                  new ChassisVelocities(vx, vy, omega).toRobotRelative(current.getRotation()));
             },
             drive)
-        .beforeStarting(() -> headingController.reset(drive.getRotation().getRadians()))
-        .until(() -> drive.getPose().getTranslation().getDistance(target.getTranslation()) < 0.3);
+        , () -> headingController.reset(drive.getRotation().getRadians()))
+        .until(() -> drive.getPose().getTranslation().getDistance(target.getTranslation()) < 0.3).withAutomaticName();
   }
 
   /** Rotate in place to aim back of robot at hub. */
@@ -884,12 +877,12 @@ public class AutoRoutines {
         new ProfiledPIDController(5.0, 0, 0.4, new TrapezoidProfile.Constraints(8.0, 20.0));
     headingController.enableContinuousInput(-Math.PI, Math.PI);
 
-    return Commands.run(
+    return V3Commands.beforeStarting(V3Commands.run(
             () -> {
               Pose2d current = drive.getPose();
               boolean isRed =
-                  DriverStation.getAlliance().isPresent()
-                      && DriverStation.getAlliance().get() == Alliance.Red;
+                  MatchState.getAlliance().isPresent()
+                      && MatchState.getAlliance().get() == Alliance.RED;
               Translation2d hubCenter = FieldConstants.getHubCenter(isRed);
 
               Translation2d toHub = hubCenter.minus(current.getTranslation());
@@ -903,10 +896,10 @@ public class AutoRoutines {
                   headingController.calculate(current.getRotation().getRadians(), targetHeading);
 
               drive.runVelocity(
-                  ChassisSpeeds.fromFieldRelativeSpeeds(0, 0, omega, current.getRotation()));
+                  new ChassisVelocities(0, 0, omega).toRobotRelative(current.getRotation()));
             },
             drive)
-        .beforeStarting(() -> headingController.reset(drive.getRotation().getRadians()));
+        , () -> headingController.reset(drive.getRotation().getRadians()));
   }
 
   /**
@@ -922,12 +915,12 @@ public class AutoRoutines {
     // good look it has corrected odometry, so we never creep again for this shoot phase.
     boolean[] tagsSeenOnce = {false};
 
-    return Commands.run(
+    return V3Commands.beforeStarting(V3Commands.run(
             () -> {
               Pose2d current = drive.getPose();
               boolean isRed =
-                  DriverStation.getAlliance().isPresent()
-                      && DriverStation.getAlliance().get() == Alliance.Red;
+                  MatchState.getAlliance().isPresent()
+                      && MatchState.getAlliance().get() == Alliance.RED;
               Translation2d hubCenter = FieldConstants.getHubCenter(isRed);
 
               Translation2d toHub = hubCenter.minus(current.getTranslation());
@@ -949,17 +942,17 @@ public class AutoRoutines {
               }
 
               drive.runVelocity(
-                  ChassisSpeeds.fromFieldRelativeSpeeds(vx, 0, omega, current.getRotation()));
+                  new ChassisVelocities(vx, 0, omega).toRobotRelative(current.getRotation()));
             },
             drive)
-        .beforeStarting(() -> headingController.reset(drive.getRotation().getRadians()));
+        , () -> headingController.reset(drive.getRotation().getRadians()));
   }
 
   /** Returns true when the back of the robot is aimed at the hub within kTrenchAimToleranceRad. */
   private boolean isAimedAtHub() {
     boolean isRed =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
+        MatchState.getAlliance().isPresent()
+            && MatchState.getAlliance().get() == Alliance.RED;
     Translation2d hubCenter = FieldConstants.getHubCenter(isRed);
     Translation2d toHub = hubCenter.minus(drive.getPose().getTranslation());
     double targetHeading =
@@ -976,9 +969,9 @@ public class AutoRoutines {
    * SmartDashboard so it is visible in Elastic at the moment it is consumed.
    */
   private double readShootFirstDelaySecs() {
-    double delay = SmartDashboard.getNumber("Auto/ShootFirstDelaySecs", 0.0);
+    double delay = NetworkTableInstance.getDefault().getTable("SmartDashboard").getEntry("Auto/ShootFirstDelaySecs").getDouble(0.0);
     Logger.recordOutput("Auto/ShootFirstDelaySecsUsed", delay);
-    SmartDashboard.putNumber("Auto/ShootFirstDelaySecsUsed", delay);
+    NetworkTableInstance.getDefault().getTable("SmartDashboard").getEntry("Auto/ShootFirstDelaySecsUsed").setDouble(delay);
     return delay;
   }
 
@@ -988,17 +981,17 @@ public class AutoRoutines {
    * until it elapses.
    */
   private Command shootFirstPreloadCommand() {
-    return Commands.parallel(
-        Commands.sequence(
-            Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
-            aimBackAtHub().withTimeout(1.5),
-            Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
-            Commands.waitSeconds(1.0),
-            Commands.runOnce(
+    return V3Commands.parallel(
+        V3Commands.sequence(
+            V3Commands.runOnce(() -> shooter.setGoal(Shooter.Goal.SHOOT)),
+            aimBackAtHub().withTimeout(org.wpilib.units.Units.Seconds.of(1.5)),
+            V3Commands.runOnce(() -> indexer.setGoal(Indexer.Goal.FEED)),
+            V3Commands.waitSeconds(1.0),
+            V3Commands.runOnce(
                 () -> {
                   indexer.setGoal(Indexer.Goal.IDLE);
                   shooter.setGoal(Shooter.Goal.IDLE);
                 })),
-        Commands.defer(() -> Commands.waitSeconds(readShootFirstDelaySecs()), Set.of()));
+        V3Commands.defer(() -> V3Commands.waitSeconds(readShootFirstDelaySecs()), Set.of()));
   }
 }

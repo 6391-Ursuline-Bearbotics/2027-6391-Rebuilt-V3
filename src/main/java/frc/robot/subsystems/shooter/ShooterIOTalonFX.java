@@ -45,9 +45,9 @@ public class ShooterIOTalonFX implements ShooterIO {
   private final StatusSignal<Temperature> rightTemp;
 
   private final Debouncer leftConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.kFalling);
+      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
   private final Debouncer rightConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.kFalling);
+      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   public ShooterIOTalonFX() {
     leftTalon = new TalonFX(ShooterConstants.leftMotorId, ShooterConstants.canBus);

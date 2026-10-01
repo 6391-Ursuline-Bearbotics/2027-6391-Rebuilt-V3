@@ -1,14 +1,18 @@
 package frc.robot.subsystems.shooter;
 
+import frc.robot.util.V3Commands;
+
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.interpolation.InterpolatingDoubleTreeMap;
-import org.wpilib.math.kinematics.ChassisSpeeds;
+import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.util.Units;
 import org.wpilib.util.Alert;
-import org.wpilib.util.Alert.AlertType;
+import org.wpilib.util.Alert.Level;
 import org.wpilib.driverstation.DriverStation;
-import org.wpilib.driverstation.DriverStation.Alliance;
+import org.wpilib.driverstation.RobotState;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.system.Timer;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
@@ -28,7 +32,7 @@ import java.util.function.Supplier;
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
-public class Shooter extends Mechanism {
+public class Shooter implements Mechanism {
   // Tunable PID gains
   private static final LoggedTunableNumber shooterKp = new LoggedTunableNumber("Shooter/kP", 0.1);
   private static final LoggedTunableNumber shooterKv = new LoggedTunableNumber("Shooter/kV", 0.12);
@@ -98,7 +102,7 @@ public class Shooter extends Mechanism {
 
   // Pose, speed, and pitch suppliers from drive
   private final Supplier<Pose2d> poseSupplier;
-  private final Supplier<ChassisSpeeds> fieldSpeedsSupplier;
+  private final Supplier<ChassisVelocities> fieldSpeedsSupplier;
   private final Supplier<Double> pitchSupplier;
 
   // Returns true while any shot button is physically held on either controller
@@ -119,7 +123,7 @@ public class Shooter extends Mechanism {
   private double commandedAngleDeg = ShooterConstants.hoodMinAngleDeg;
   private double hoodAngleCommandDeg = 0.0; // 0 = not active
   private double distanceToTarget = 0.0;
-  private Translation2d aimTarget = Translation2d.kZero;
+  private Translation2d aimTarget = Translation2d.ZERO;
 
   // Hybrid control state — latches true once at setpoint, resets on goal change
   private boolean spunUp = false;
@@ -134,20 +138,20 @@ public class Shooter extends Mechanism {
 
   // Alerts
   private final Alert leftDisconnectedAlert =
-      new Alert("Shooter left motor disconnected.", AlertType.kError);
+      new Alert("Shooter left motor disconnected.", "Shooter left motor disconnected.", Level.HIGH);
   private final Alert rightDisconnectedAlert =
-      new Alert("Shooter right motor disconnected.", AlertType.kError);
+      new Alert("Shooter right motor disconnected.", "Shooter right motor disconnected.", Level.HIGH);
   private final Alert leftOverTempAlert =
-      new Alert("Shooter left motor over temperature.", AlertType.kWarning);
+      new Alert("Shooter left motor over temperature.", "Shooter left motor over temperature.", Level.MEDIUM);
   private final Alert rightOverTempAlert =
-      new Alert("Shooter right motor over temperature.", AlertType.kWarning);
-  private final Alert jamAlert = new Alert("Shooter jam detected!", AlertType.kError);
+      new Alert("Shooter right motor over temperature.", "Shooter right motor over temperature.", Level.MEDIUM);
+  private final Alert jamAlert = new Alert("Shooter jam detected!", "Shooter jam detected!", Level.HIGH);
 
   public Shooter(
       ShooterIO io,
       ShooterHoodIO hoodIO,
       Supplier<Pose2d> poseSupplier,
-      Supplier<ChassisSpeeds> fieldSpeedsSupplier,
+      Supplier<ChassisVelocities> fieldSpeedsSupplier,
       Supplier<Boolean> indexerFeedingSupplier,
       Supplier<Double> pitchSupplier,
       BooleanSupplier shotButtonHeldSupplier) {
@@ -249,7 +253,7 @@ public class Shooter extends Mechanism {
     hoodIO.updateInputs(hoodInputs);
     Logger.processInputs("Shooter/Hood", hoodInputs);
 
-    if (DriverStation.isDisabled()) {
+    if (RobotState.isDisabled()) {
       io.stop();
       hoodIO.stop();
       updateAlerts();
@@ -373,7 +377,7 @@ public class Shooter extends Mechanism {
     // Trench approach override — lowers hood to 26° when driving into a trench during teleop.
     // Skipped in autonomous (auto routines manage hood angle explicitly) and while any shot
     // button is physically held on either controller.
-    if (DriverStation.isTeleop()
+    if (RobotState.isTeleop()
         && !shotButtonHeldSupplier.getAsBoolean()
         && isApproachingTrench()) {
       commandedAngleDeg = 26.0;
@@ -402,8 +406,8 @@ public class Shooter extends Mechanism {
     Pose2d robotPose = poseSupplier.get();
     Translation2d robotPosition = robotPose.getTranslation();
     boolean isRedAlliance =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
+        MatchState.getAlliance().isPresent()
+            && MatchState.getAlliance().get() == Alliance.RED;
 
     // Determine real target (hub or passing target)
     Translation2d realTarget;
@@ -416,7 +420,7 @@ public class Shooter extends Mechanism {
     // Apply shoot-on-the-move compensation using virtual target method
     Translation2d compensatedTarget = realTarget;
     if (shootOnMoveEnabled.get() > 0.5) {
-      ChassisSpeeds fieldSpeeds = fieldSpeedsSupplier.get();
+      ChassisVelocities fieldSpeeds = fieldSpeedsSupplier.get();
       compensatedTarget =
           computeVirtualTarget(
               robotPosition, realTarget, fieldSpeeds, ShooterConstants.shotCompensationIterations);
@@ -437,11 +441,11 @@ public class Shooter extends Mechanism {
     // shootOnMoveEnabled tunable as the lateral (heading) compensation.
     double effectiveDistance = distanceToTarget;
     if (shootOnMoveEnabled.get() > 0.5) {
-      ChassisSpeeds fieldSpeeds = fieldSpeedsSupplier.get();
+      ChassisVelocities fieldSpeeds = fieldSpeedsSupplier.get();
       Pose2d robotPose = poseSupplier.get();
       boolean isRed =
-          DriverStation.getAlliance().isPresent()
-              && DriverStation.getAlliance().get() == Alliance.Red;
+          MatchState.getAlliance().isPresent()
+              && MatchState.getAlliance().get() == Alliance.RED;
       Translation2d toHub = FieldConstants.getHubCenter(isRed).minus(robotPose.getTranslation());
       double dist = toHub.getNorm();
       if (dist > 0.01) {
@@ -450,7 +454,7 @@ public class Shooter extends Mechanism {
         double uy = toHub.getY() / dist;
         // Positive = moving toward hub, negative = moving away
         double vRadialTowardHub =
-            fieldSpeeds.vxMetersPerSecond * ux + fieldSpeeds.vyMetersPerSecond * uy;
+            fieldSpeeds.vx * ux + fieldSpeeds.vy * uy;
         double tof = distanceToTOF.get(distanceToTarget);
         // Moving away reduces ball speed toward hub — compensate by boosting effective distance
         effectiveDistance = distanceToTarget - vRadialTowardHub * tof;
@@ -478,7 +482,7 @@ public class Shooter extends Mechanism {
   private Translation2d computeVirtualTarget(
       Translation2d robotPosition,
       Translation2d realTarget,
-      ChassisSpeeds fieldSpeeds,
+      ChassisVelocities fieldSpeeds,
       int iterations) {
     Translation2d virtualTarget = realTarget;
     for (int i = 0; i < iterations; i++) {
@@ -486,8 +490,8 @@ public class Shooter extends Mechanism {
       double tof = distanceToTOF.get(distance);
       virtualTarget =
           new Translation2d(
-              realTarget.getX() - fieldSpeeds.vxMetersPerSecond * tof,
-              realTarget.getY() - fieldSpeeds.vyMetersPerSecond * tof);
+              realTarget.getX() - fieldSpeeds.vx * tof,
+              realTarget.getY() - fieldSpeeds.vy * tof);
     }
     return virtualTarget;
   }
@@ -499,7 +503,7 @@ public class Shooter extends Mechanism {
   @AutoLogOutput(key = "Shooter/TrenchApproachActive")
   private boolean isApproachingTrench() {
     Translation2d robotPos = poseSupplier.get().getTranslation();
-    ChassisSpeeds fieldSpeeds = fieldSpeedsSupplier.get();
+    ChassisVelocities fieldSpeeds = fieldSpeedsSupplier.get();
     double approachDist = trenchApproachDistance.get();
     double minVel = trenchApproachMinVelocity.get();
     double xMargin = trenchApproachXMargin.get();
@@ -531,7 +535,7 @@ public class Shooter extends Mechanism {
       }
 
       // Check velocity toward the trench wall (dot product with wall direction)
-      double velocityTowardTrench = fieldSpeeds.vyMetersPerSecond * wallDirections[i];
+      double velocityTowardTrench = fieldSpeeds.vy * wallDirections[i];
       if (velocityTowardTrench > minVel) {
         return true;
       }
@@ -586,22 +590,22 @@ public class Shooter extends Mechanism {
 
   // Command factories
   public Command setGoalCommand(Goal goal) {
-    return Commands.runOnce(() -> setGoal(goal)).withName("Shooter " + goal.name());
+    return V3Commands.named(V3Commands.runOnce(() -> setGoal(goal)), "Shooter " + goal.name());
   }
 
   public Command shootCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.SHOOT), () -> setGoal(Goal.IDLE), this)
-        .withName("Shooter Shoot");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.SHOOT), () -> setGoal(Goal.IDLE), this)
+        , "Shooter Shoot");
   }
 
   public Command passCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.PASS), () -> setGoal(Goal.IDLE), this)
-        .withName("Shooter Pass");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.PASS), () -> setGoal(Goal.IDLE), this)
+        , "Shooter Pass");
   }
 
   public Command ejectCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.EJECT), () -> setGoal(Goal.IDLE), this)
-        .withName("Shooter Eject");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.EJECT), () -> setGoal(Goal.IDLE), this)
+        , "Shooter Eject");
   }
 
   /** Run shooter motors at a raw voltage for characterization. Bypasses goal logic. */
@@ -624,27 +628,26 @@ public class Shooter extends Mechanism {
     List<Double> voltageSamples = new LinkedList<>();
     Timer timer = new Timer();
 
-    return Commands.sequence(
+    return V3Commands.sequence(
         // Reset data
-        Commands.runOnce(
+        V3Commands.runOnce(
             () -> {
               velocitySamples.clear();
               voltageSamples.clear();
             }),
 
         // Start timer
-        Commands.runOnce(timer::restart),
+        V3Commands.runOnce(timer::restart),
 
         // Ramp voltage and collect samples
-        Commands.run(
+        V3Commands.finallyDo(V3Commands.run(
                 () -> {
                   double voltage = timer.get() * rampRate;
                   shooter.runCharacterization(voltage);
                   velocitySamples.add(shooter.getCharacterizationVelocity());
                   voltageSamples.add(voltage);
                 },
-                shooter)
-            .finallyDo(
+                shooter),
                 () -> {
                   shooter.runCharacterization(0.0);
 

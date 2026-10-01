@@ -128,10 +128,10 @@ public class PhoenixOdometryThread extends Thread {
       // Save new data to queues
       Drive.odometryLock.lock();
       try {
-        // Sample timestamp is current FPGA time minus average CAN latency
+        // Sample timestamp is current robot clock time minus average CAN latency
         // Default timestamps from Phoenix are NOT compatible with
-        // FPGA timestamps, this solution is imperfect but close
-        double timestamp = RobotController.getFPGATime() / 1e6;
+        // robot clock timestamps, this solution is imperfect but close
+        double timestamp = RobotController.getTime() / 1e9;
         double totalLatency = 0.0;
         for (BaseStatusSignal signal : phoenixSignals) {
           totalLatency += signal.getTimestamp().getLatency();

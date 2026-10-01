@@ -2,8 +2,8 @@ package frc.robot.subsystems.indexer;
 
 import org.wpilib.math.util.MathUtil;
 import org.wpilib.math.controller.PIDController;
-import org.wpilib.math.system.plant.DCMotor;
-import org.wpilib.math.system.plant.LinearSystemId;
+import org.wpilib.math.system.DCMotor;
+import org.wpilib.math.system.Models;
 import org.wpilib.simulation.DCMotorSim;
 
 public class IndexerKickerIOSim implements IndexerKickerIO {
@@ -24,7 +24,7 @@ public class IndexerKickerIOSim implements IndexerKickerIO {
   public IndexerKickerIOSim() {
     sim =
         new DCMotorSim(
-            LinearSystemId.createDCMotorSystem(
+            Models.singleJointedArmFromPhysicalConstants(
                 GEARBOX, IndexerConstants.kickerSimMOI, IndexerConstants.kickerGearRatio),
             GEARBOX);
   }
@@ -32,18 +32,18 @@ public class IndexerKickerIOSim implements IndexerKickerIO {
   @Override
   public void updateInputs(IndexerKickerIOInputs inputs) {
     if (closedLoop) {
-      appliedVolts = ffVolts + controller.calculate(sim.getAngularVelocityRadPerSec());
+      appliedVolts = ffVolts + controller.calculate(sim.getAngularVelocity());
     } else {
       controller.reset();
     }
 
-    sim.setInputVoltage(MathUtil.clamp(appliedVolts, -12.0, 12.0));
+    sim.setInputVoltage(Math.clamp(appliedVolts, -12.0, 12.0));
     sim.update(0.02);
 
     inputs.connected = true;
-    inputs.velocityRadPerSec = sim.getAngularVelocityRadPerSec();
+    inputs.velocityRadPerSec = sim.getAngularVelocity();
     inputs.appliedVolts = appliedVolts;
-    inputs.statorCurrentAmps = Math.abs(sim.getCurrentDrawAmps());
+    inputs.statorCurrentAmps = Math.abs(sim.getCurrentDraw());
     inputs.supplyCurrentAmps = inputs.statorCurrentAmps * Math.abs(appliedVolts) / 12.0;
     inputs.tempCelsius = 25.0;
   }

@@ -2,7 +2,9 @@ package frc.robot;
 
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.driverstation.DriverStation;
-import org.wpilib.driverstation.DriverStation.Alliance;
+import org.wpilib.driverstation.RobotState;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.Alliance;
 import java.util.Optional;
 
 /**
@@ -20,17 +22,17 @@ public class GameData {
 
   /** Returns true if our alliance's hub is currently active. */
   public static boolean isHubActive() {
-    Optional<Alliance> alliance = DriverStation.getAlliance();
+    Optional<Alliance> alliance = MatchState.getAlliance();
     if (alliance.isEmpty()) {
       return true;
     }
-    if (DriverStation.isAutonomousEnabled()) {
+    if (RobotState.isAutonomousEnabled()) {
       return true;
     }
-    if (!DriverStation.isTeleopEnabled()) {
+    if (!RobotState.isTeleopEnabled()) {
       return false;
     }
-    return isHubActiveInTeleop(alliance.get(), DriverStation.getMatchTime());
+    return isHubActiveInTeleop(alliance.get(), MatchState.getMatchTime());
   }
 
   /**
@@ -38,31 +40,31 @@ public class GameData {
    * time. Useful for triggering warnings before a shift starts.
    */
   public static boolean isHubActivatingSoon(double leadTimeSeconds) {
-    Optional<Alliance> alliance = DriverStation.getAlliance();
+    Optional<Alliance> alliance = MatchState.getAlliance();
     if (alliance.isEmpty()) {
       return false;
     }
-    if (!DriverStation.isTeleopEnabled()) {
+    if (!RobotState.isTeleopEnabled()) {
       return false;
     }
-    double matchTime = DriverStation.getMatchTime();
+    double matchTime = MatchState.getMatchTime();
     return !isHubActiveInTeleop(alliance.get(), matchTime)
         && isHubActiveInTeleop(alliance.get(), matchTime - leadTimeSeconds);
   }
 
   /** Returns true if our hub is active or will be within the spinup lead time. */
   public static boolean isHubActiveOrSoon() {
-    Optional<Alliance> alliance = DriverStation.getAlliance();
+    Optional<Alliance> alliance = MatchState.getAlliance();
     if (alliance.isEmpty()) {
       return true;
     }
-    if (DriverStation.isAutonomousEnabled()) {
+    if (RobotState.isAutonomousEnabled()) {
       return true;
     }
-    if (!DriverStation.isTeleopEnabled()) {
+    if (!RobotState.isTeleopEnabled()) {
       return false;
     }
-    double matchTime = DriverStation.getMatchTime();
+    double matchTime = MatchState.getMatchTime();
     return isHubActiveInTeleop(alliance.get(), matchTime)
         || isHubActiveInTeleop(alliance.get(), matchTime - SPINUP_LEAD_TIME_SECONDS);
   }
@@ -73,14 +75,14 @@ public class GameData {
    * active. Only gates when game data is present.
    */
   public static boolean canSpinUp(Translation2d robotPosition) {
-    if (!DriverStation.isTeleopEnabled()) {
+    if (!RobotState.isTeleopEnabled()) {
       return true;
     }
-    Optional<Alliance> alliance = DriverStation.getAlliance();
+    Optional<Alliance> alliance = MatchState.getAlliance();
     if (alliance.isEmpty()) {
       return true;
     }
-    boolean isRed = alliance.get() == Alliance.Red;
+    boolean isRed = alliance.get() == Alliance.RED;
     if (!FieldConstants.isInOwnAllianceZone(robotPosition, isRed)) {
       return true;
     }
@@ -93,18 +95,18 @@ public class GameData {
    * time of becoming active. Only gates when game data is present.
    */
   public static boolean canFeed(Translation2d robotPosition) {
-    if (!DriverStation.isTeleopEnabled()) {
+    if (!RobotState.isTeleopEnabled()) {
       return true;
     }
-    Optional<Alliance> alliance = DriverStation.getAlliance();
+    Optional<Alliance> alliance = MatchState.getAlliance();
     if (alliance.isEmpty()) {
       return true;
     }
-    boolean isRed = alliance.get() == Alliance.Red;
+    boolean isRed = alliance.get() == Alliance.RED;
     if (!FieldConstants.isInOwnAllianceZone(robotPosition, isRed)) {
       return true;
     }
-    double matchTime = DriverStation.getMatchTime();
+    double matchTime = MatchState.getMatchTime();
     return isHubActiveInTeleop(alliance.get(), matchTime)
         || isHubActiveInTeleop(alliance.get(), matchTime - FEED_LEAD_TIME_SECONDS);
   }
@@ -115,7 +117,7 @@ public class GameData {
    */
   private static boolean isHubActiveInTeleop(Alliance alliance, double matchTime) {
     if (cachedRedInactiveFirst == null) {
-      String gameData = DriverStation.getGameSpecificMessage();
+      String gameData = MatchState.getGameData().orElse("");
       if (gameData.isEmpty()) {
         return true; // No game data yet, assume active
       }
@@ -133,7 +135,7 @@ public class GameData {
 
     // Shift 1 is active for the alliance that did NOT go inactive first
     boolean shift1Active =
-        (alliance == Alliance.Red) ? !cachedRedInactiveFirst : cachedRedInactiveFirst;
+        (alliance == Alliance.RED) ? !cachedRedInactiveFirst : cachedRedInactiveFirst;
 
     if (matchTime > 130) {
       return true; // Transition shift, always active

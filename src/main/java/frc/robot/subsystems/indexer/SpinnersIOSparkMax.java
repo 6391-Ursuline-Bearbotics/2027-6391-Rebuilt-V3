@@ -1,8 +1,9 @@
 package frc.robot.subsystems.indexer;
 
 import com.revrobotics.RelativeEncoder;
-import com.revrobotics.spark.SparkBase.PersistMode;
-import com.revrobotics.spark.SparkBase.ResetMode;
+import org.wpilib.hardware.bus.CANPort;
+import com.revrobotics.PersistMode;
+import com.revrobotics.ResetMode;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
@@ -16,15 +17,15 @@ public class SpinnersIOSparkMax implements SpinnersIO {
   private final RelativeEncoder rightEncoder;
 
   private final Debouncer leftConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.kFalling);
+      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
   private final Debouncer rightConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.kFalling);
+      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   private int currentLimitAmps = IndexerConstants.spinnerCurrentLimitAmps;
 
   public SpinnersIOSparkMax() {
-    leftMotor = new SparkMax(IndexerConstants.leftSpinnerMotorId, MotorType.kBrushless);
-    rightMotor = new SparkMax(IndexerConstants.rightSpinnerMotorId, MotorType.kBrushless);
+    leftMotor = new SparkMax(CANPort.CAN_S0, IndexerConstants.leftSpinnerMotorId, MotorType.kBrushless);
+    rightMotor = new SparkMax(CANPort.CAN_S0, IndexerConstants.rightSpinnerMotorId, MotorType.kBrushless);
 
     leftEncoder = leftMotor.getEncoder();
     rightEncoder = rightMotor.getEncoder();
@@ -42,29 +43,29 @@ public class SpinnersIOSparkMax implements SpinnersIO {
   @Override
   public void updateInputs(SpinnersIOInputs inputs) {
     // Connection detected by whether the motor responds without faults (no sticky faults = present)
-    boolean leftOk = leftMotor.getFaults().can == false;
-    boolean rightOk = rightMotor.getFaults().can == false;
+    boolean leftOk = leftMotor.getFaults().isValid() && !leftMotor.getFaults().get().can;
+    boolean rightOk = rightMotor.getFaults().isValid() && !rightMotor.getFaults().get().can;
     inputs.leftConnected = leftConnectedDebounce.calculate(leftOk);
     inputs.rightConnected = rightConnectedDebounce.calculate(rightOk);
 
-    inputs.leftVelocityRPM = leftEncoder.getVelocity();
-    inputs.rightVelocityRPM = rightEncoder.getVelocity();
-    inputs.leftCurrentAmps = leftMotor.getOutputCurrent();
-    inputs.rightCurrentAmps = rightMotor.getOutputCurrent();
-    inputs.leftAppliedVolts = leftMotor.getAppliedOutput() * leftMotor.getBusVoltage();
-    inputs.rightAppliedVolts = rightMotor.getAppliedOutput() * rightMotor.getBusVoltage();
+    inputs.leftVelocityRPM = leftEncoder.getVelocity().get(0.0);
+    inputs.rightVelocityRPM = rightEncoder.getVelocity().get(0.0);
+    inputs.leftCurrentAmps = leftMotor.getOutputCurrent().get(0.0);
+    inputs.rightCurrentAmps = rightMotor.getOutputCurrent().get(0.0);
+    inputs.leftAppliedVolts = leftMotor.getAppliedOutput().get(0.0) * leftMotor.getBusVoltage().get(0.0);
+    inputs.rightAppliedVolts = rightMotor.getAppliedOutput().get(0.0) * rightMotor.getBusVoltage().get(0.0);
   }
 
   @Override
   public void setSpeed(double speed) {
-    leftMotor.set(speed);
-    rightMotor.set(speed);
+    leftMotor.setThrottle(speed);
+    rightMotor.setThrottle(speed);
   }
 
   @Override
   public void stop() {
-    leftMotor.set(0.0);
-    rightMotor.set(0.0);
+    leftMotor.setThrottle(0.0);
+    rightMotor.setThrottle(0.0);
   }
 
   @Override

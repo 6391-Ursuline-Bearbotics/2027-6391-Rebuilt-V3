@@ -1,8 +1,8 @@
 package frc.robot.subsystems.intake;
 
 import org.wpilib.math.util.MathUtil;
-import org.wpilib.math.system.plant.DCMotor;
-import org.wpilib.math.system.plant.LinearSystemId;
+import org.wpilib.math.system.DCMotor;
+import org.wpilib.math.system.Models;
 import org.wpilib.simulation.DCMotorSim;
 
 public class IntakeDeployIOSim implements IntakeDeployIO {
@@ -18,17 +18,17 @@ public class IntakeDeployIOSim implements IntakeDeployIO {
   public IntakeDeployIOSim() {
     sim =
         new DCMotorSim(
-            LinearSystemId.createDCMotorSystem(
+            Models.singleJointedArmFromPhysicalConstants(
                 GEARBOX, IntakeConstants.deploySimMOI, IntakeConstants.deployGearRatio),
             GEARBOX);
   }
 
   @Override
   public void updateInputs(IntakeDeployIOInputs inputs) {
-    sim.setInputVoltage(MathUtil.clamp(appliedVolts, -12.0, 12.0));
+    sim.setInputVoltage(Math.clamp(appliedVolts, -12.0, 12.0));
     sim.update(0.02);
 
-    double position = sim.getAngularPositionRad();
+    double position = sim.getAngularPosition();
     boolean atHardStop = false;
 
     // Model hard stops by clamping position and detecting contact
@@ -41,14 +41,14 @@ public class IntakeDeployIOSim implements IntakeDeployIO {
     }
 
     inputs.connected = true;
-    inputs.positionRad = sim.getAngularPositionRad();
-    inputs.velocityRadPerSec = sim.getAngularVelocityRadPerSec();
+    inputs.positionRad = sim.getAngularPosition();
+    inputs.velocityRadPerSec = sim.getAngularVelocity();
     inputs.appliedVolts = appliedVolts;
     // Report elevated current when hitting hard stop to trigger stall detection
     inputs.statorCurrentAmps =
         atHardStop
             ? IntakeConstants.deployCurrentThreshold + 20.0
-            : Math.abs(sim.getCurrentDrawAmps());
+            : Math.abs(sim.getCurrentDraw());
     inputs.supplyCurrentAmps = inputs.statorCurrentAmps * Math.abs(appliedVolts) / 12.0;
     inputs.tempCelsius = 25.0;
   }

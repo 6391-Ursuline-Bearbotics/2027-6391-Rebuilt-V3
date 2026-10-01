@@ -1,9 +1,12 @@
 package frc.robot.subsystems.indexer;
 
+import frc.robot.util.V3Commands;
+
 import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.util.Alert;
-import org.wpilib.util.Alert.AlertType;
+import org.wpilib.util.Alert.Level;
 import org.wpilib.driverstation.DriverStation;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.system.Timer;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
@@ -16,7 +19,7 @@ import java.util.function.Supplier;
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
-public class Indexer extends Mechanism {
+public class Indexer implements Mechanism {
   // Tunable spinner parameters
   private static final LoggedTunableNumber spinnerSpeed =
       new LoggedTunableNumber("Indexer/Spinner/Speed", IndexerConstants.spinnerSpeed);
@@ -109,18 +112,18 @@ public class Indexer extends Mechanism {
 
   // Alerts
   private final Alert beltDisconnectedAlert =
-      new Alert("Indexer belt motor disconnected.", AlertType.kError);
+      new Alert("Indexer belt motor disconnected.", "Indexer belt motor disconnected.", Level.HIGH);
   private final Alert kickerDisconnectedAlert =
-      new Alert("Indexer kicker motor disconnected.", AlertType.kError);
+      new Alert("Indexer kicker motor disconnected.", "Indexer kicker motor disconnected.", Level.HIGH);
   private final Alert beltOverTempAlert =
-      new Alert("Indexer belt motor over temperature.", AlertType.kWarning);
+      new Alert("Indexer belt motor over temperature.", "Indexer belt motor over temperature.", Level.MEDIUM);
   private final Alert kickerOverTempAlert =
-      new Alert("Indexer kicker motor over temperature.", AlertType.kWarning);
-  private final Alert jamAlert = new Alert("Indexer jam detected.", AlertType.kWarning);
+      new Alert("Indexer kicker motor over temperature.", "Indexer kicker motor over temperature.", Level.MEDIUM);
+  private final Alert jamAlert = new Alert("Indexer jam detected.", "Indexer jam detected.", Level.MEDIUM);
   private final Alert leftSpinnerDisconnectedAlert =
-      new Alert("Left spinner motor disconnected.", AlertType.kError);
+      new Alert("Left spinner motor disconnected.", "Left spinner motor disconnected.", Level.HIGH);
   private final Alert rightSpinnerDisconnectedAlert =
-      new Alert("Right spinner motor disconnected.", AlertType.kError);
+      new Alert("Right spinner motor disconnected.", "Right spinner motor disconnected.", Level.HIGH);
 
   public Indexer(
       IndexerBeltIO beltIO,
@@ -155,7 +158,7 @@ public class Indexer extends Mechanism {
     Logger.processInputs("Indexer/Spinners", spinnersInputs);
 
     // Stop everything when disabled and reset spinner state so it re-initializes cleanly on enable
-    if (DriverStation.isDisabled()) {
+    if (RobotState.isDisabled()) {
       beltIO.stop();
       kickerIO.stop();
       spinnersIO.stop();
@@ -333,16 +336,16 @@ public class Indexer extends Mechanism {
 
   // Command factories
   public Command setGoalCommand(Goal goal) {
-    return Commands.runOnce(() -> setGoal(goal)).withName("Indexer " + goal.name());
+    return V3Commands.named(V3Commands.runOnce(() -> setGoal(goal)), "Indexer " + goal.name());
   }
 
   public Command feedCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.FEED), () -> setGoal(Goal.IDLE), this)
-        .withName("Indexer Feed");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.FEED), () -> setGoal(Goal.IDLE), this)
+        , "Indexer Feed");
   }
 
   public Command feedUngatedCommand() {
-    return Commands.startEnd(
+    return V3Commands.named(V3Commands.startEnd(
             () -> {
               feedUngated = true;
               setGoal(Goal.FEED);
@@ -352,11 +355,11 @@ public class Indexer extends Mechanism {
               setGoal(Goal.IDLE);
             },
             this)
-        .withName("Indexer Feed Ungated");
+        , "Indexer Feed Ungated");
   }
 
   public Command ejectCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.EJECT), () -> setGoal(Goal.IDLE), this)
-        .withName("Indexer Eject");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.EJECT), () -> setGoal(Goal.IDLE), this)
+        , "Indexer Eject");
   }
 }

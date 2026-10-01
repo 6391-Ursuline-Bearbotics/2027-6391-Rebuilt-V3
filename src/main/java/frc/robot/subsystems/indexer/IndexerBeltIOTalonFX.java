@@ -31,7 +31,7 @@ public class IndexerBeltIOTalonFX implements IndexerBeltIO {
   private final StatusSignal<Current> supplyCurrent;
   private final StatusSignal<Temperature> temp;
 
-  private final Debouncer connectedDebounce = new Debouncer(0.5, Debouncer.DebounceType.kFalling);
+  private final Debouncer connectedDebounce = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   public IndexerBeltIOTalonFX() {
     talon = new TalonFX(IndexerConstants.beltMotorId, IndexerConstants.canBus);

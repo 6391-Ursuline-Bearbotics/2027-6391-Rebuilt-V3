@@ -7,8 +7,8 @@
 
 package frc.robot;
 
-import org.wpilib.vision.apriltag.AprilTagFieldLayout;
-import org.wpilib.vision.apriltag.AprilTagFields;
+import org.wpilib.fields.Field;
+import org.wpilib.fields.Fields;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.util.Units;
 
@@ -20,8 +20,8 @@ import org.wpilib.math.util.Units;
 public class FieldConstants {
 
   // Load the official field layout
-  private static final AprilTagFieldLayout aprilTagLayout =
-      AprilTagFieldLayout.loadField(AprilTagFields.k2026RebuiltWelded);
+  private static final Field aprilTagLayout =
+      Field.loadField(Fields.FRC_2026_REBUILT_WELDED);
 
   // Field dimensions
   public static final double fieldLength = aprilTagLayout.getFieldLength();

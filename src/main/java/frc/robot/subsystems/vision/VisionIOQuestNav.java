@@ -81,7 +81,7 @@ public class VisionIOQuestNav implements VisionIO {
     inputs.connected = isConnected();
 
     // Update target observation (QuestNav doesn't provide target angles)
-    inputs.latestTargetObservation = new TargetObservation(Rotation2d.kZero, Rotation2d.kZero);
+    inputs.latestTargetObservation = new TargetObservation(Rotation2d.ZERO, Rotation2d.ZERO);
 
     // Get robot pose
     var pose = getRobotPose();
@@ -129,7 +129,7 @@ public class VisionIOQuestNav implements VisionIO {
 
   /** Returns if the Quest is connected. */
   public boolean isConnected() {
-    return ((RobotController.getFPGATime() - questBatteryPercent.getLastChange()) / 1000) < 250;
+    return ((RobotController.getTime() - questBatteryPercent.getLastChange()) / 1_000_000) < 250;
   }
 
   /** Gets the raw Rotation3d of the Quest. */

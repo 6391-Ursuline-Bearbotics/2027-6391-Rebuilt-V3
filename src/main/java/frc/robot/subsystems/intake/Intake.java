@@ -1,8 +1,11 @@
 package frc.robot.subsystems.intake;
 
+import frc.robot.util.V3Commands;
+
 import org.wpilib.util.Alert;
-import org.wpilib.util.Alert.AlertType;
+import org.wpilib.util.Alert.Level;
 import org.wpilib.driverstation.DriverStation;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.system.Timer;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Mechanism;
@@ -17,7 +20,7 @@ import java.util.List;
 import org.littletonrobotics.junction.AutoLogOutput;
 import org.littletonrobotics.junction.Logger;
 
-public class Intake extends Mechanism {
+public class Intake implements Mechanism {
   // Tunable roller gains
   private static final LoggedTunableNumber rollerKp =
       new LoggedTunableNumber("Intake/Roller/kP", 0.6);
@@ -125,14 +128,14 @@ public class Intake extends Mechanism {
 
   // Alerts
   private final Alert deployDisconnectedAlert =
-      new Alert("Intake deploy motor disconnected.", AlertType.kError);
+      new Alert("Intake deploy motor disconnected.", "Intake deploy motor disconnected.", Level.HIGH);
   private final Alert rollerDisconnectedAlert =
-      new Alert("Intake roller motor disconnected.", AlertType.kError);
+      new Alert("Intake roller motor disconnected.", "Intake roller motor disconnected.", Level.HIGH);
   private final Alert deployOverTempAlert =
-      new Alert("Intake deploy motor over temperature.", AlertType.kWarning);
+      new Alert("Intake deploy motor over temperature.", "Intake deploy motor over temperature.", Level.MEDIUM);
   private final Alert rollerOverTempAlert =
-      new Alert("Intake roller motor over temperature.", AlertType.kWarning);
-  private final Alert rollerJamAlert = new Alert("Intake roller jam detected.", AlertType.kWarning);
+      new Alert("Intake roller motor over temperature.", "Intake roller motor over temperature.", Level.MEDIUM);
+  private final Alert rollerJamAlert = new Alert("Intake roller jam detected.", "Intake roller jam detected.", Level.MEDIUM);
 
   public Intake(IntakeDeployIO deployIO, IntakeRollerIO rollerIO) {
     this.deployIO = deployIO;
@@ -173,7 +176,7 @@ public class Intake extends Mechanism {
    * indexer during shooting. Does not require the intake subsystem.
    */
   public Command shootingPressureCommand() {
-    return Commands.startEnd(
+    return V3Commands.startEnd(
         () -> setShootingPressureMode(true), () -> setShootingPressureMode(false));
   }
 
@@ -215,7 +218,7 @@ public class Intake extends Mechanism {
     Logger.processInputs("Intake/Roller", rollerInputs);
 
     // Stop everything when disabled
-    if (DriverStation.isDisabled()) {
+    if (RobotState.isDisabled()) {
       deployIO.stop();
       rollerIO.stop();
       updateAlerts();
@@ -446,12 +449,12 @@ public class Intake extends Mechanism {
 
   // Command factories
   public Command setGoalCommand(Goal goal) {
-    return Commands.runOnce(() -> setGoal(goal)).withName("Intake " + goal.name());
+    return V3Commands.named(V3Commands.runOnce(() -> setGoal(goal)), "Intake " + goal.name());
   }
 
   public Command intakeCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.INTAKE), () -> setGoal(Goal.IDLE), this)
-        .withName("Intake");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.INTAKE), () -> setGoal(Goal.IDLE), this)
+        , "Intake");
   }
 
   /**
@@ -460,14 +463,14 @@ public class Intake extends Mechanism {
    * parallel with other intake goal commands.
    */
   public Command periodicAutoRehomeCommand() {
-    return Commands.sequence(Commands.waitSeconds(1.5), Commands.runOnce(() -> setGoal(Goal.IDLE)))
-        .repeatedly()
-        .withName("Intake Periodic Auto Rehome");
+    return V3Commands.named(V3Commands.repeatedly(V3Commands.sequence(V3Commands.waitSeconds(1.5), V3Commands.runOnce(() -> setGoal(Goal.IDLE)))
+        )
+        , "Intake Periodic Auto Rehome");
   }
 
   public Command ejectCommand() {
-    return Commands.startEnd(() -> setGoal(Goal.EJECT), () -> setGoal(Goal.IDLE), this)
-        .withName("Eject");
+    return V3Commands.named(V3Commands.startEnd(() -> setGoal(Goal.EJECT), () -> setGoal(Goal.IDLE), this)
+        , "Eject");
   }
 
   /**
@@ -481,31 +484,30 @@ public class Intake extends Mechanism {
     List<Double> voltageSamples = new LinkedList<>();
     Timer timer = new Timer();
 
-    return Commands.sequence(
+    return V3Commands.sequence(
         // Deploy the intake first and wait for it to settle
-        Commands.runOnce(() -> intake.setGoal(Goal.DEPLOYED_IDLE)),
-        Commands.waitSeconds(startDelay),
+        V3Commands.runOnce(() -> intake.setGoal(Goal.DEPLOYED_IDLE)),
+        V3Commands.waitSeconds(startDelay),
 
         // Reset data
-        Commands.runOnce(
+        V3Commands.runOnce(
             () -> {
               velocitySamples.clear();
               voltageSamples.clear();
             }),
 
         // Start timer
-        Commands.runOnce(timer::restart),
+        V3Commands.runOnce(timer::restart),
 
         // Ramp voltage and collect samples
-        Commands.run(
+        V3Commands.finallyDo(V3Commands.run(
                 () -> {
                   double voltage = timer.get() * rampRate;
                   intake.runRollerCharacterization(voltage);
                   velocitySamples.add(intake.getRollerCharacterizationVelocity());
                   voltageSamples.add(voltage);
                 },
-                intake)
-            .finallyDo(
+                intake),
                 () -> {
                   intake.runRollerCharacterization(0.0);
                   intake.setGoal(Goal.IDLE);

@@ -56,7 +56,7 @@ public class VisionIOLimelight implements VisionIO {
     // Update connection status based on whether an update has been seen in the last
     // 250ms
     inputs.connected =
-        ((RobotController.getFPGATime() - latencySubscriber.getLastChange()) / 1000) < 250;
+        ((RobotController.getTime() - latencySubscriber.getLastChange()) / 1_000_000) < 250;
 
     // Update target observation
     inputs.latestTargetObservation =
@@ -80,7 +80,7 @@ public class VisionIOLimelight implements VisionIO {
       poseObservations.add(
           new PoseObservation(
               // Timestamp, based on server timestamp of publish and latency
-              rawSample.timestamp * 1.0e-6 - rawSample.value[6] * 1.0e-3,
+              rawSample.timestamp * 1.0e-9 - rawSample.value[6] * 1.0e-3,
 
               // 3D pose estimate
               parsePose(rawSample.value),
@@ -106,7 +106,7 @@ public class VisionIOLimelight implements VisionIO {
       poseObservations.add(
           new PoseObservation(
               // Timestamp, based on server timestamp of publish and latency
-              rawSample.timestamp * 1.0e-6 - rawSample.value[6] * 1.0e-3,
+              rawSample.timestamp * 1.0e-9 - rawSample.value[6] * 1.0e-3,
 
               // 3D pose estimate
               parsePose(rawSample.value),

@@ -40,9 +40,12 @@ public final class ShooterConstants {
    */
   public static final double shooterHeadingOffsetDegrees = 4.0;
 
-  // Hood servos (PWM ports - placeholder, update when wired)
+  // Hood servos on SystemCore SmartIO PWM channels.
   public static final int hoodLeftServoPWM = 0;
   public static final int hoodRightServoPWM = 1;
+  // Preserve the previous WPILib Servo pulse range; calibrate for the installed servos.
+  public static final int hoodServoMinPulseMicros = 600;
+  public static final int hoodServoMaxPulseMicros = 2400;
   public static final double hoodMinAngleDeg = 20.0;
   public static final double hoodMaxAngleDeg = 45.0;
 

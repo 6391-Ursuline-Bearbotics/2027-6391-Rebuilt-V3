@@ -2,8 +2,8 @@ package frc.robot.subsystems.shooter;
 
 import org.wpilib.math.util.MathUtil;
 import org.wpilib.math.controller.PIDController;
-import org.wpilib.math.system.plant.DCMotor;
-import org.wpilib.math.system.plant.LinearSystemId;
+import org.wpilib.math.system.DCMotor;
+import org.wpilib.math.system.Models;
 import org.wpilib.simulation.DCMotorSim;
 
 public class ShooterIOSim implements ShooterIO {
@@ -27,12 +27,12 @@ public class ShooterIOSim implements ShooterIO {
   public ShooterIOSim() {
     leftSim =
         new DCMotorSim(
-            LinearSystemId.createDCMotorSystem(
+            Models.singleJointedArmFromPhysicalConstants(
                 GEARBOX, ShooterConstants.simMOI, ShooterConstants.gearRatio),
             GEARBOX);
     rightSim =
         new DCMotorSim(
-            LinearSystemId.createDCMotorSystem(
+            Models.singleJointedArmFromPhysicalConstants(
                 GEARBOX, ShooterConstants.simMOI, ShooterConstants.gearRatio),
             GEARBOX);
   }
@@ -40,30 +40,30 @@ public class ShooterIOSim implements ShooterIO {
   @Override
   public void updateInputs(ShooterIOInputs inputs) {
     if (closedLoop) {
-      leftAppliedVolts = ffVolts + leftController.calculate(leftSim.getAngularVelocityRadPerSec());
+      leftAppliedVolts = ffVolts + leftController.calculate(leftSim.getAngularVelocity());
       rightAppliedVolts =
-          ffVolts + rightController.calculate(rightSim.getAngularVelocityRadPerSec());
+          ffVolts + rightController.calculate(rightSim.getAngularVelocity());
     } else {
       leftController.reset();
       rightController.reset();
     }
 
-    leftSim.setInputVoltage(MathUtil.clamp(leftAppliedVolts, -12.0, 12.0));
-    rightSim.setInputVoltage(MathUtil.clamp(rightAppliedVolts, -12.0, 12.0));
+    leftSim.setInputVoltage(Math.clamp(leftAppliedVolts, -12.0, 12.0));
+    rightSim.setInputVoltage(Math.clamp(rightAppliedVolts, -12.0, 12.0));
     leftSim.update(0.02);
     rightSim.update(0.02);
 
     inputs.leftConnected = true;
-    inputs.leftVelocityRadPerSec = leftSim.getAngularVelocityRadPerSec();
+    inputs.leftVelocityRadPerSec = leftSim.getAngularVelocity();
     inputs.leftAppliedVolts = leftAppliedVolts;
-    inputs.leftStatorCurrentAmps = Math.abs(leftSim.getCurrentDrawAmps());
+    inputs.leftStatorCurrentAmps = Math.abs(leftSim.getCurrentDraw());
     inputs.leftSupplyCurrentAmps = inputs.leftStatorCurrentAmps * Math.abs(leftAppliedVolts) / 12.0;
     inputs.leftTempCelsius = 25.0;
 
     inputs.rightConnected = true;
-    inputs.rightVelocityRadPerSec = rightSim.getAngularVelocityRadPerSec();
+    inputs.rightVelocityRadPerSec = rightSim.getAngularVelocity();
     inputs.rightAppliedVolts = rightAppliedVolts;
-    inputs.rightStatorCurrentAmps = Math.abs(rightSim.getCurrentDrawAmps());
+    inputs.rightStatorCurrentAmps = Math.abs(rightSim.getCurrentDraw());
     inputs.rightSupplyCurrentAmps =
         inputs.rightStatorCurrentAmps * Math.abs(rightAppliedVolts) / 12.0;
     inputs.rightTempCelsius = 25.0;

@@ -13,7 +13,7 @@ public class ShooterHoodIOSim implements ShooterHoodIO {
   @Override
   public void setAngle(double angleDeg) {
     positionDeg =
-        MathUtil.clamp(
+        Math.clamp(
             angleDeg, ShooterConstants.hoodMinAngleDeg, ShooterConstants.hoodMaxAngleDeg);
   }
 

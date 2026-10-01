@@ -11,8 +11,8 @@ import static frc.robot.subsystems.vision.VisionConstants.*;
 import static org.wpilib.units.Units.Seconds;
 
 import choreo.Choreo;
-import choreo.auto.AutoChooser;
-import choreo.auto.AutoFactory;
+import frc.robot.auto.AutoChooser;
+import frc.robot.auto.AutoFactory;
 import choreo.trajectory.SwerveSample;
 import org.wpilib.math.util.MathUtil;
 import org.wpilib.math.controller.ProfiledPIDController;
@@ -20,20 +20,21 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.kinematics.ChassisSpeeds;
+import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.trajectory.TrapezoidProfile;
 import org.wpilib.math.util.Units;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.driverstation.DriverStation;
-import org.wpilib.driverstation.DriverStation.Alliance;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.GenericHID;
 import org.wpilib.system.Timer;
 import org.wpilib.smartdashboard.Field2d;
-import org.wpilib.smartdashboard.SmartDashboard;
+import org.wpilib.tunable.Tunables;
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.wpilib.command3.button.CommandNiDsXboxController;
-import org.wpilib.command3.button.Trigger;
+import org.wpilib.command3.Trigger;
 import frc.robot.commands.DriveCommands;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.drive.Drive;
@@ -69,7 +70,6 @@ import frc.robot.subsystems.shooter.ShooterIOTalonFX;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.VisionIO;
 import frc.robot.subsystems.vision.VisionIOLimelight;
-import frc.robot.subsystems.vision.VisionIOPhotonVisionSim;
 import frc.robot.util.LoggedTunableNumber;
 import java.util.ArrayList;
 import java.util.List;
@@ -108,7 +108,6 @@ public class RobotContainer {
   private DriveMode currentDriveMode = DriveMode.STANDARD;
 
   public RobotContainer() {
-    DriverStation.silenceJoystickConnectionWarning(true);
     switch (Constants.currentMode) {
       case REAL:
         // Real robot, instantiate hardware IO implementations
@@ -178,7 +177,11 @@ public class RobotContainer {
         vision =
             new Vision(
                 drive::addVisionMeasurement,
-                new VisionIOPhotonVisionSim(camera0Name, robotToCamera0, drive::getPose));
+                new VisionIO() {});
+        new org.wpilib.util.Alert(
+            "PhotonVisionSimulationUnavailable",
+            "Camera simulation disabled until a compatible PhotonVision vendordep is installed.",
+            org.wpilib.util.Alert.Level.LOW).set(true);
         intake = new Intake(new IntakeDeployIOSim(), new IntakeRollerIOSim());
         indexer =
             new Indexer(
@@ -230,15 +233,15 @@ public class RobotContainer {
 
     // Set up Choreo auto factory, routines, and chooser
     autoFactory =
-        new AutoFactory(drive::getPose, drive::setPose, drive::followTrajectory, true, drive);
+        new AutoFactory(drive::setPose, drive::followTrajectory, true, drive);
 
     // Preload Choreo classes at init time instead of delaying auto start
-    Scheduler.getDefault().schedule(autoFactory.warmupCmd());
+    Choreo.<SwerveSample>loadTrajectory("Safe");
 
     autoRoutines = new AutoRoutines(autoFactory, drive, intake, indexer, shooter, vision);
     autoChooser = new AutoChooser();
-    SmartDashboard.putData("Auto Choices", autoChooser);
-    SmartDashboard.putData("Auto Preview", autoPreviewField);
+    Tunables.getTable("SmartDashboard").publish("Auto Choices", autoChooser);
+    Tunables.getTable("SmartDashboard").publish("Auto Preview", autoPreviewField);
 
     // Competition auto routines (always available)
     autoChooser.addRoutine("Shoot Only", autoRoutines::shootOnly);
@@ -279,11 +282,14 @@ public class RobotContainer {
           () -> DriveCommands.feedforwardCharacterization(drive));
       autoChooser.addCmd(
           "Drive Forward 15ft", () -> DriveCommands.driveForward(drive, Units.feetToMeters(15)));
-      // TODO: SysId support pending org.wpilib.sysid migration to Commands V3
-      // autoChooser.addCmd("Drive SysId (Quasistatic Forward)", () -> drive.sysIdQuasistatic(...));
-      // autoChooser.addCmd("Drive SysId (Quasistatic Reverse)", () -> drive.sysIdQuasistatic(...));
-      // autoChooser.addCmd("Drive SysId (Dynamic Forward)", () -> drive.sysIdDynamic(...));
-      // autoChooser.addCmd("Drive SysId (Dynamic Reverse)", () -> drive.sysIdDynamic(...));
+      autoChooser.addCmd("Drive SysId (Quasistatic Forward)",
+          () -> drive.sysIdQuasistatic(Drive.SysIdDirection.FORWARD));
+      autoChooser.addCmd("Drive SysId (Quasistatic Reverse)",
+          () -> drive.sysIdQuasistatic(Drive.SysIdDirection.REVERSE));
+      autoChooser.addCmd("Drive SysId (Dynamic Forward)",
+          () -> drive.sysIdDynamic(Drive.SysIdDirection.FORWARD));
+      autoChooser.addCmd("Drive SysId (Dynamic Reverse)",
+          () -> drive.sysIdDynamic(Drive.SysIdDirection.REVERSE));
       autoChooser.addCmd(
           "Intake Roller FF Characterization", () -> Intake.rollerFFCharacterization(intake));
       autoChooser.addCmd(
@@ -347,7 +353,7 @@ public class RobotContainer {
             Command.sequence(
                     Command.noRequirements(co -> shooter.setGoal(Shooter.Goal.SHOOT))
                         .named("Spin Up Shooter"),
-                    aimAtHub().withTimeout(Seconds.of(1.0)).withAutomaticName(),
+                    aimAtHub().withTimeout(Seconds.of(1.0)),
                     drive.run(co -> drive.stopWithX()).named("Lock X"))
                 .withAutomaticName());
 
@@ -357,7 +363,7 @@ public class RobotContainer {
             drive.run(
                     co ->
                         drive.setPose(
-                            new Pose2d(drive.getPose().getTranslation(), Rotation2d.kZero)))
+                            new Pose2d(drive.getPose().getTranslation(), Rotation2d.ZERO)))
                 .named("Reset Gyro"));
 
     // Right bumper: idle shooter and move hood to 26°, wait for arrival
@@ -370,7 +376,7 @@ public class RobotContainer {
                               shooter.setHoodAngle(26.0);
                             })
                         .named("Idle Shooter"),
-                    Command.waitUntil(() -> shooter.isHoodAtAngle(26.0, 1.0)).withAutomaticName())
+                    Command.waitUntil(() -> shooter.isHoodAtAngle(26.0, 1.0)).named("Wait For Hood"))
                 .withAutomaticName());
 
     // Operator intake controls
@@ -407,8 +413,8 @@ public class RobotContainer {
             Command.noRequirements(
                     co -> {
                       boolean isRed =
-                          DriverStation.getAlliance().isPresent()
-                              && DriverStation.getAlliance().get() == Alliance.Red;
+                          MatchState.getAlliance().isPresent()
+                              && MatchState.getAlliance().get() == Alliance.RED;
                       boolean inAllianceZone =
                           FieldConstants.isInOwnAllianceZone(
                               drive.getPose().getTranslation(), isRed);
@@ -462,8 +468,8 @@ public class RobotContainer {
             Command.noRequirements(
                     co -> {
                       boolean isRed =
-                          DriverStation.getAlliance().isPresent()
-                              && DriverStation.getAlliance().get() == Alliance.Red;
+                          MatchState.getAlliance().isPresent()
+                              && MatchState.getAlliance().get() == Alliance.RED;
                       boolean inAllianceZone =
                           FieldConstants.isInOwnAllianceZone(
                               drive.getPose().getTranslation(), isRed);
@@ -487,7 +493,7 @@ public class RobotContainer {
                 .withAutomaticName());
 
     // DPAD: manual distance setpoint + spin up shooter
-    op.pov(270)
+    op.getHID().povLeft()
         .onTrue(
             Command.noRequirements(
                     co -> {
@@ -495,7 +501,7 @@ public class RobotContainer {
                       shooter.setGoal(Shooter.Goal.SHOOT);
                     })
                 .named("Set 5ft"));
-    op.pov(90)
+    op.getHID().povRight()
         .onTrue(
             Command.noRequirements(
                     co -> {
@@ -503,7 +509,7 @@ public class RobotContainer {
                       shooter.setGoal(Shooter.Goal.SHOOT);
                     })
                 .named("Set 10ft"));
-    op.pov(0)
+    op.getHID().povUp()
         .onTrue(
             Command.noRequirements(
                     co -> {
@@ -511,7 +517,7 @@ public class RobotContainer {
                       shooter.setGoal(Shooter.Goal.SHOOT);
                     })
                 .named("Adjust Distance Up"));
-    op.pov(180)
+    op.getHID().povDown()
         .onTrue(
             Command.noRequirements(
                     co -> {
@@ -539,14 +545,18 @@ public class RobotContainer {
         .whileTrue(
             Command.noRequirements(
                     co -> {
-                      drv.getHID().setRumble(GenericHID.RumbleType.kBothRumble, 1.0);
-                      op.getHID().setRumble(GenericHID.RumbleType.kBothRumble, 1.0);
+                      drv.getHID().setRumble(GenericHID.RumbleType.LEFT_RUMBLE, 1.0);
+                      drv.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 1.0);
+                      op.getHID().setRumble(GenericHID.RumbleType.LEFT_RUMBLE, 1.0);
+                      op.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 1.0);
                       co.park();
                     })
                 .whenCanceled(
                     () -> {
-                      drv.getHID().setRumble(GenericHID.RumbleType.kBothRumble, 0.0);
-                      op.getHID().setRumble(GenericHID.RumbleType.kBothRumble, 0.0);
+                      drv.getHID().setRumble(GenericHID.RumbleType.LEFT_RUMBLE, 0.0);
+                      drv.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 0.0);
+                      op.getHID().setRumble(GenericHID.RumbleType.LEFT_RUMBLE, 0.0);
+                      op.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 0.0);
                     })
                 .named("Hub Activation Rumble"));
 
@@ -555,22 +565,22 @@ public class RobotContainer {
         .onTrue(
             Command.noRequirements(
                     co -> {
-                      drv.getHID().setRumble(GenericHID.RumbleType.kRightRumble, 1.0);
-                      op.getHID().setRumble(GenericHID.RumbleType.kRightRumble, 1.0);
+                      drv.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 1.0);
+                      op.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 1.0);
                       org.wpilib.system.Timer t = new org.wpilib.system.Timer();
                       t.restart();
                       while (!t.hasElapsed(2.0)) {
                         co.yield();
                       }
-                      drv.getHID().setRumble(GenericHID.RumbleType.kRightRumble, 0.0);
-                      op.getHID().setRumble(GenericHID.RumbleType.kRightRumble, 0.0);
+                      drv.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 0.0);
+                      op.getHID().setRumble(GenericHID.RumbleType.RIGHT_RUMBLE, 0.0);
                     })
                 .named("Roller Jam Rumble"));
 
     // Driver DPAD: snap intake (front) to cardinal field directions
     // UP = 180°, RIGHT = 90°, DOWN = 0°, LEFT = -90°
     final double kDpadSnapTolerance = Math.toRadians(2.0);
-    drv.pov(0)
+    drv.getHID().povUp()
         .onTrue(
             DriveCommands.joystickDriveAtAngle(
                     drive,
@@ -583,7 +593,7 @@ public class RobotContainer {
                                 drive.getRotation().minus(Rotation2d.fromDegrees(180)).getRadians())
                             < kDpadSnapTolerance)
                 .withAutomaticName());
-    drv.pov(90)
+    drv.getHID().povRight()
         .onTrue(
             DriveCommands.joystickDriveAtAngle(
                     drive,
@@ -596,19 +606,19 @@ public class RobotContainer {
                                 drive.getRotation().minus(Rotation2d.fromDegrees(90)).getRadians())
                             < kDpadSnapTolerance)
                 .withAutomaticName());
-    drv.pov(180)
+    drv.getHID().povDown()
         .onTrue(
             DriveCommands.joystickDriveAtAngle(
                     drive,
                     () -> -drv.getLeftY(),
                     () -> -drv.getLeftX(),
-                    () -> Rotation2d.kZero)
+                    () -> Rotation2d.ZERO)
                 .until(
                     () ->
-                        Math.abs(drive.getRotation().minus(Rotation2d.kZero).getRadians())
+                        Math.abs(drive.getRotation().minus(Rotation2d.ZERO).getRadians())
                             < kDpadSnapTolerance)
                 .withAutomaticName());
-    drv.pov(270)
+    drv.getHID().povLeft()
         .onTrue(
             DriveCommands.joystickDriveAtAngle(
                     drive,
@@ -653,8 +663,8 @@ public class RobotContainer {
               rehomeTimer.restart();
               rehoming[0] = false;
               while (true) {
-                ChassisSpeeds speeds = drive.getFieldRelativeSpeeds();
-                double speed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+                ChassisVelocities speeds = drive.getFieldRelativeSpeeds();
+                double speed = Math.hypot(speeds.vx, speeds.vy);
                 if (speed > 0.15) {
                   rehoming[0] = false;
                   rehomeTimer.restart();
@@ -686,8 +696,8 @@ public class RobotContainer {
               rehoming[0] = false;
               intake.setGoal(Intake.Goal.INTAKE);
               while (true) {
-                ChassisSpeeds speeds = drive.getFieldRelativeSpeeds();
-                double speed = Math.hypot(speeds.vxMetersPerSecond, speeds.vyMetersPerSecond);
+                ChassisVelocities speeds = drive.getFieldRelativeSpeeds();
+                double speed = Math.hypot(speeds.vx, speeds.vy);
                 if (speed > 0.15) {
                   intake.setGoal(Intake.Goal.INTAKE);
                   rehoming[0] = false;
@@ -712,29 +722,27 @@ public class RobotContainer {
     double omega = MathUtil.applyDeadband(-drv.getRightX(), 0.1);
     omega = Math.copySign(omega * omega, omega);
 
-    ChassisSpeeds speeds =
-        new ChassisSpeeds(
+    ChassisVelocities speeds =
+        new ChassisVelocities(
             linearVelocity.getX() * drive.getMaxLinearSpeedMetersPerSec(),
             linearVelocity.getY() * drive.getMaxLinearSpeedMetersPerSec(),
             omega * drive.getMaxAngularSpeedRadPerSec());
 
     boolean isFlipped =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
-    ChassisSpeeds robotRelative =
-        ChassisSpeeds.fromFieldRelativeSpeeds(
-            speeds,
-            isFlipped ? drive.getRotation().plus(new Rotation2d(Math.PI)) : drive.getRotation());
+        MatchState.getAlliance().isPresent()
+            && MatchState.getAlliance().get() == Alliance.RED;
+    ChassisVelocities robotRelative =
+        (speeds).toRobotRelative(isFlipped ? drive.getRotation().plus(new Rotation2d(Math.PI)) : drive.getRotation());
 
     if (autoAimGyrating) {
       double ampM = Units.inchesToMeters(gyrationAmplitudeInches.get());
       double freqHz = gyrationFreqHz.get();
-      robotRelative.vyMetersPerSecond +=
+      robotRelative.vy +=
           ampM
               * 2.0
               * Math.PI
               * freqHz
-              * Math.cos(2.0 * Math.PI * freqHz * Timer.getFPGATimestamp());
+              * Math.cos(2.0 * Math.PI * freqHz * Timer.getTimestamp());
     }
 
     drive.runVelocity(robotRelative);
@@ -744,8 +752,8 @@ public class RobotContainer {
     Translation2d linearVelocity = getLinearVelocityFromJoysticks();
 
     boolean isRedAlliance =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
+        MatchState.getAlliance().isPresent()
+            && MatchState.getAlliance().get() == Alliance.RED;
 
     Translation2d robotPosition = drive.getPose().getTranslation();
 
@@ -765,23 +773,23 @@ public class RobotContainer {
     double omega = aimTargetController.calculate(drive.getRotation().getRadians(), targetHeading);
 
     double aimMaxSpeed = 1.5;
-    ChassisSpeeds speeds =
-        new ChassisSpeeds(
+    ChassisVelocities speeds =
+        new ChassisVelocities(
             linearVelocity.getX() * aimMaxSpeed, linearVelocity.getY() * aimMaxSpeed, omega);
 
     Rotation2d robotHeading =
         isRedAlliance ? drive.getRotation().plus(new Rotation2d(Math.PI)) : drive.getRotation();
-    ChassisSpeeds robotRelative = ChassisSpeeds.fromFieldRelativeSpeeds(speeds, robotHeading);
+    ChassisVelocities robotRelative = (speeds).toRobotRelative(robotHeading);
 
     if (autoAimGyrating) {
       double ampM = Units.inchesToMeters(gyrationAmplitudeInches.get());
       double freqHz = gyrationFreqHz.get();
-      robotRelative.vyMetersPerSecond +=
+      robotRelative.vy +=
           ampM
               * 2.0
               * Math.PI
               * freqHz
-              * Math.cos(2.0 * Math.PI * freqHz * Timer.getFPGATimestamp());
+              * Math.cos(2.0 * Math.PI * freqHz * Timer.getTimestamp());
     }
 
     drive.runVelocity(robotRelative);
@@ -791,8 +799,8 @@ public class RobotContainer {
 
   private boolean isAimedAtTarget() {
     boolean isRedAlliance =
-        DriverStation.getAlliance().isPresent()
-            && DriverStation.getAlliance().get() == Alliance.Red;
+        MatchState.getAlliance().isPresent()
+            && MatchState.getAlliance().get() == Alliance.RED;
     Translation2d robotPosition = drive.getPose().getTranslation();
     Translation2d target;
     if (FieldConstants.isInOwnAllianceZone(robotPosition, isRedAlliance)) {
@@ -818,8 +826,8 @@ public class RobotContainer {
     double linearMagnitude = MathUtil.applyDeadband(Math.hypot(x, y), 0.1);
     Rotation2d linearDirection = new Rotation2d(Math.atan2(y, x));
     linearMagnitude = linearMagnitude * linearMagnitude;
-    return new Pose2d(Translation2d.kZero, linearDirection)
-        .transformBy(new Transform2d(linearMagnitude, 0.0, Rotation2d.kZero))
+    return new Pose2d(Translation2d.ZERO, linearDirection)
+        .transformBy(new Transform2d(linearMagnitude, 0.0, Rotation2d.ZERO))
         .getTranslation();
   }
 
@@ -836,8 +844,8 @@ public class RobotContainer {
               while (true) {
                 Pose2d current = drive.getPose();
                 boolean isRed =
-                    DriverStation.getAlliance().isPresent()
-                        && DriverStation.getAlliance().get() == Alliance.Red;
+                    MatchState.getAlliance().isPresent()
+                        && MatchState.getAlliance().get() == Alliance.RED;
                 Translation2d hubCenter = FieldConstants.getHubCenter(isRed);
                 Translation2d toHub = hubCenter.minus(current.getTranslation());
                 double angleToHub = Math.atan2(toHub.getY(), toHub.getX());
@@ -848,7 +856,7 @@ public class RobotContainer {
                 double omega =
                     headingController.calculate(current.getRotation().getRadians(), targetHeading);
                 drive.runVelocity(
-                    ChassisSpeeds.fromFieldRelativeSpeeds(0, 0, omega, current.getRotation()));
+                    new ChassisVelocities(0, 0, omega).toRobotRelative(current.getRotation()));
                 co.yield();
               }
             })
@@ -870,7 +878,7 @@ public class RobotContainer {
   }
 
   public String getSelectedAutoName() {
-    return autoChooser.selectedCommand().getName();
+    return autoChooser.selectedName();
   }
 
   /**

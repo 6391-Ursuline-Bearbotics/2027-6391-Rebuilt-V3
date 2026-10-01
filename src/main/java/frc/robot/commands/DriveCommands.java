@@ -16,11 +16,12 @@ import org.wpilib.math.geometry.Pose2d;
 import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Transform2d;
 import org.wpilib.math.geometry.Translation2d;
-import org.wpilib.math.kinematics.ChassisSpeeds;
+import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.trajectory.TrapezoidProfile;
 import org.wpilib.math.util.Units;
 import org.wpilib.driverstation.DriverStation;
-import org.wpilib.driverstation.DriverStation.Alliance;
+import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.Alliance;
 import org.wpilib.system.Timer;
 import org.wpilib.command3.Command;
 import frc.robot.subsystems.drive.Drive;
@@ -50,8 +51,8 @@ public class DriveCommands {
     double linearMagnitude = MathUtil.applyDeadband(Math.hypot(x, y), DEADBAND);
     Rotation2d linearDirection = new Rotation2d(Math.atan2(y, x));
     linearMagnitude = linearMagnitude * linearMagnitude;
-    return new Pose2d(Translation2d.kZero, linearDirection)
-        .transformBy(new Transform2d(linearMagnitude, 0.0, Rotation2d.kZero))
+    return new Pose2d(Translation2d.ZERO, linearDirection)
+        .transformBy(new Transform2d(linearMagnitude, 0.0, Rotation2d.ZERO))
         .getTranslation();
   }
 
@@ -71,18 +72,16 @@ public class DriveCommands {
                       xSupplier.getAsDouble(), ySupplier.getAsDouble());
               double omega = MathUtil.applyDeadband(omegaSupplier.getAsDouble(), DEADBAND);
               omega = Math.copySign(omega * omega, omega);
-              ChassisSpeeds speeds =
-                  new ChassisSpeeds(
+              ChassisVelocities speeds =
+                  new ChassisVelocities(
                       linearVelocity.getX() * drive.getMaxLinearSpeedMetersPerSec(),
                       linearVelocity.getY() * drive.getMaxLinearSpeedMetersPerSec(),
                       omega * drive.getMaxAngularSpeedRadPerSec());
               boolean isFlipped =
-                  DriverStation.getAlliance().isPresent()
-                      && DriverStation.getAlliance().get() == Alliance.Red;
+                  MatchState.getAlliance().isPresent()
+                      && MatchState.getAlliance().get() == Alliance.RED;
               drive.runVelocity(
-                  ChassisSpeeds.fromFieldRelativeSpeeds(
-                      speeds,
-                      isFlipped
+                  (speeds).toRobotRelative(isFlipped
                           ? drive.getRotation().plus(new Rotation2d(Math.PI))
                           : drive.getRotation()));
             })
@@ -118,18 +117,16 @@ public class DriveCommands {
                 double omega =
                     angleController.calculate(
                         drive.getRotation().getRadians(), rotationSupplier.get().getRadians());
-                ChassisSpeeds speeds =
-                    new ChassisSpeeds(
+                ChassisVelocities speeds =
+                    new ChassisVelocities(
                         linearVelocity.getX() * drive.getMaxLinearSpeedMetersPerSec(),
                         linearVelocity.getY() * drive.getMaxLinearSpeedMetersPerSec(),
                         omega);
                 boolean isFlipped =
-                    DriverStation.getAlliance().isPresent()
-                        && DriverStation.getAlliance().get() == Alliance.Red;
+                    MatchState.getAlliance().isPresent()
+                        && MatchState.getAlliance().get() == Alliance.RED;
                 drive.runVelocity(
-                    ChassisSpeeds.fromFieldRelativeSpeeds(
-                        speeds,
-                        isFlipped
+                    (speeds).toRobotRelative(isFlipped
                             ? drive.getRotation().plus(new Rotation2d(Math.PI))
                             : drive.getRotation()));
                 co.yield();
@@ -172,18 +169,16 @@ public class DriveCommands {
                 }
                 double omega =
                     angleController.calculate(drive.getRotation().getRadians(), targetHeading);
-                ChassisSpeeds speeds =
-                    new ChassisSpeeds(
+                ChassisVelocities speeds =
+                    new ChassisVelocities(
                         linearVelocity.getX() * drive.getMaxLinearSpeedMetersPerSec(),
                         linearVelocity.getY() * drive.getMaxLinearSpeedMetersPerSec(),
                         omega);
                 boolean isFlipped =
-                    DriverStation.getAlliance().isPresent()
-                        && DriverStation.getAlliance().get() == Alliance.Red;
+                    MatchState.getAlliance().isPresent()
+                        && MatchState.getAlliance().get() == Alliance.RED;
                 drive.runVelocity(
-                    ChassisSpeeds.fromFieldRelativeSpeeds(
-                        speeds,
-                        isFlipped
+                    (speeds).toRobotRelative(isFlipped
                             ? drive.getRotation().plus(new Rotation2d(Math.PI))
                             : drive.getRotation()));
                 co.yield();
@@ -214,8 +209,8 @@ public class DriveCommands {
             // Allow modules to orient
             drive
                 .runRepeatedly(() -> drive.runCharacterization(0.0))
-                .withTimeout(Seconds.of(FF_START_DELAY))
-                .named("FF Orient"),
+                .named("FF Orient")
+                .withTimeout(Seconds.of(FF_START_DELAY)),
 
             // Start timer
             Command.noRequirements(co -> timer.restart()).named("FF Start Timer"),
@@ -272,7 +267,7 @@ public class DriveCommands {
                         .runRepeatedly(
                             () -> {
                               double speed = limiter.calculate(WHEEL_RADIUS_MAX_VELOCITY);
-                              drive.runVelocity(new ChassisSpeeds(0.0, 0.0, speed));
+                              drive.runVelocity(new ChassisVelocities(0.0, 0.0, speed));
                             })
                         .named("Spin Up"))
                 .withAutomaticName(),
@@ -280,7 +275,7 @@ public class DriveCommands {
             // Measurement sequence
             Command.sequence(
                     // Wait for modules to orient
-                    Command.waitFor(Seconds.of(1.0)).withAutomaticName(),
+                    Command.waitFor(Seconds.of(1.0)).named("Wait For Heading"),
 
                     // Record starting measurement
                     Command.noRequirements(
@@ -340,7 +335,7 @@ public class DriveCommands {
    * Drives the robot forward a specified distance at a moderate speed. Useful for verifying encoder
    * accuracy by measuring actual distance traveled vs. odometry.
    */
-  public static Command driveForward(Drive drive, double distanceMeters) {
+  public static Command driveForward(Drive drive, double distance) {
     double speedMetersPerSec = 1.5;
 
     return Command.sequence(
@@ -351,8 +346,8 @@ public class DriveCommands {
             drive
                 .run(
                     co -> {
-                      while (drive.getPose().getTranslation().getNorm() < distanceMeters) {
-                        drive.runVelocity(new ChassisSpeeds(speedMetersPerSec, 0.0, 0.0));
+                      while (drive.getPose().getTranslation().getNorm() < distance) {
+                        drive.runVelocity(new ChassisVelocities(speedMetersPerSec, 0.0, 0.0));
                         co.yield();
                       }
                     })
@@ -369,9 +364,9 @@ public class DriveCommands {
                       System.out.println("********** Drive Forward Results **********");
                       System.out.println(
                           "\tTarget: "
-                              + formatter.format(distanceMeters)
+                              + formatter.format(distance)
                               + " m ("
-                              + formatter.format(Units.metersToFeet(distanceMeters))
+                              + formatter.format(Units.metersToFeet(distance))
                               + " ft)");
                       System.out.println(
                           "\tActual: "
@@ -386,7 +381,7 @@ public class DriveCommands {
 
   private static class WheelRadiusCharacterizationState {
     double[] positions = new double[4];
-    Rotation2d lastAngle = Rotation2d.kZero;
+    Rotation2d lastAngle = Rotation2d.ZERO;
     double gyroDelta = 0.0;
   }
 }
