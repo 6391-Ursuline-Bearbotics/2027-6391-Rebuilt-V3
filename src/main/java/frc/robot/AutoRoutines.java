@@ -15,7 +15,6 @@ import org.wpilib.math.geometry.Rotation2d;
 import org.wpilib.math.geometry.Translation2d;
 import org.wpilib.math.kinematics.ChassisVelocities;
 import org.wpilib.math.trajectory.TrapezoidProfile;
-import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.driverstation.DriverStation;
 import org.wpilib.driverstation.MatchState;
 import org.wpilib.driverstation.Alliance;
@@ -62,13 +61,14 @@ public class AutoRoutines {
   private static final LoggedTunableNumber shootSettleSecs =
       new LoggedTunableNumber("Auto/ShootSettleSecs", 0.5);
 
+  private static final org.wpilib.tunable.TunableDouble shootFirstDelaySecs =
+      org.wpilib.tunable.TunableDouble.createConfig(0.0,
+          org.wpilib.tunable.TunableConfig.of(org.wpilib.tunable.TunableOption.ROBUST)
+              .withProperty("persistent", "true"));
+
   static {
-    // setDefaultDouble only writes if the entry doesn't already exist, so Elastic values
-    // survive robot restarts (unlike putNumber which always resets).
-    NetworkTableInstance.getDefault()
-        .getTable("SmartDashboard")
-        .getEntry("Auto/ShootFirstDelaySecs")
-        .setDefaultDouble(0.0);
+    org.wpilib.tunable.Tunables.getTable("Autonomous")
+        .publish("ShootFirstDelaySecs", shootFirstDelaySecs);
   }
 
   // Gather clump detection: roller stator amps above this threshold triggers slow-down.
@@ -964,14 +964,11 @@ public class AutoRoutines {
     return Math.abs(error) < kTrenchAimToleranceRad;
   }
 
-  /**
-   * Reads Auto/ShootFirstDelaySecs from SmartDashboard and logs the value both to AdvantageKit and
-   * SmartDashboard so it is visible in Elastic at the moment it is consumed.
-   */
+  /** Reads the autonomous tunable and records the consumed delay as telemetry. */
   private double readShootFirstDelaySecs() {
-    double delay = NetworkTableInstance.getDefault().getTable("SmartDashboard").getEntry("Auto/ShootFirstDelaySecs").getDouble(0.0);
+    double delay = shootFirstDelaySecs.get();
     Logger.recordOutput("Auto/ShootFirstDelaySecsUsed", delay);
-    NetworkTableInstance.getDefault().getTable("SmartDashboard").getEntry("Auto/ShootFirstDelaySecsUsed").setDouble(delay);
+    org.wpilib.telemetry.Telemetry.log("Autonomous/ShootFirstDelaySecsUsed", delay);
     return delay;
   }
 

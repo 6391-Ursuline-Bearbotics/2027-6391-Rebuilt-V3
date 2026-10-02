@@ -26,6 +26,7 @@ import org.wpilib.math.util.Units;
 import org.wpilib.networktables.NetworkTableInstance;
 import org.wpilib.driverstation.DriverStation;
 import org.wpilib.driverstation.MatchState;
+import org.wpilib.driverstation.RobotState;
 import org.wpilib.driverstation.Alliance;
 import org.wpilib.driverstation.GenericHID;
 import org.wpilib.system.Timer;
@@ -103,6 +104,7 @@ public class RobotContainer {
   private final AutoChooser autoChooser;
   private final Field2d autoPreviewField = new Field2d();
   private String lastPreviewName = "";
+  private boolean lastPreviewRed;
 
   // Current drive mode
   private DriveMode currentDriveMode = DriveMode.STANDARD;
@@ -240,8 +242,8 @@ public class RobotContainer {
 
     autoRoutines = new AutoRoutines(autoFactory, drive, intake, indexer, shooter, vision);
     autoChooser = new AutoChooser();
-    Tunables.getTable("SmartDashboard").publish("Auto Choices", autoChooser);
-    Tunables.getTable("SmartDashboard").publish("Auto Preview", autoPreviewField);
+    Tunables.getTable("Autonomous").publish("Chooser", autoChooser);
+    org.wpilib.telemetry.Telemetry.log("Autonomous/Preview", autoPreviewField);
 
     // Competition auto routines (always available)
     autoChooser.addRoutine("Shoot Only", autoRoutines::shootOnly);
@@ -304,6 +306,10 @@ public class RobotContainer {
     drive.setDefaultCommand(
         drive.runRepeatedly(
                 () -> {
+                  if (!RobotState.isTeleopEnabled()) {
+                    drive.stop();
+                    return;
+                  }
                   switch (currentDriveMode) {
                     case STANDARD:
                       runStandardDrive();
@@ -877,22 +883,27 @@ public class RobotContainer {
     return autoFactory;
   }
 
+  Drive getDrive() {
+    return drive;
+  }
+
   public String getSelectedAutoName() {
     return autoChooser.selectedName();
   }
 
   /**
-   * Called from Robot.robotPeriodic(). Redraws the Auto Preview Field2d whenever the selected auto
-   * name changes.
+   * Publishes the final pose for this scheduler cycle and redraws the autonomous preview when
+   * selection or alliance changes.
    */
-  public void updateAutoPreview() {
-    var chooserTable =
-        NetworkTableInstance.getDefault().getTable("SmartDashboard").getSubTable("Auto Choices");
-    String name =
-        chooserTable.getEntry("selected").getString(chooserTable.getEntry("active").getString(""));
-    if (name.isEmpty() || name.equals(lastPreviewName)) return;
+  public void updateFieldVisualizations() {
+    drive.publishField();
+    String name = autoChooser.selectedName();
+    boolean red = MatchState.getAlliance().orElse(Alliance.BLUE) == Alliance.RED;
+    if (name.equals(lastPreviewName) && red == lastPreviewRed) return;
     lastPreviewName = name;
+    lastPreviewRed = red;
     autoPreviewField.getObject("path").setPoses(buildPreviewPoses(name));
+    org.wpilib.telemetry.Telemetry.log("Autonomous/Preview", autoPreviewField);
   }
 
   private record TrajEntry(String name, boolean flip) {}
@@ -908,6 +919,8 @@ public class RobotContainer {
   @SuppressWarnings("java:S1479")
   private List<TrajEntry> buildPreviewEntries(String autoName) {
     return switch (autoName) {
+      case "Depot Cycle" -> List.of(t("DepotCycle"));
+      case "Depot Inside" -> List.of(t("DepotInside"));
       case "Safe", "Safe (Shoot First)" -> List.of(t("Safe"));
       case "Outpost Double Pass", "Outpost Double Pass (Shoot First)" -> List.of(
           t("OutpostBump"),
@@ -948,7 +961,9 @@ public class RobotContainer {
       Choreo.<SwerveSample>loadTrajectory(e.name())
           .ifPresent(
               traj -> {
-                var samples = e.flip() ? traj.flipped().samples() : traj.samples();
+                var transformed = e.flip() ? traj.mirrorY() : traj;
+                if (lastPreviewRed) transformed = transformed.flipped();
+                var samples = transformed.samples();
                 for (SwerveSample s : samples) {
                   poses.add(s.getPose());
                 }

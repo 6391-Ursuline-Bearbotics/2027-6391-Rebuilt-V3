@@ -126,8 +126,8 @@ public class Drive implements Mechanism {
     // Usage reporting for swerve template
     UsageReporting.reportUsage("RobotDrive", "Swerve_AdvantageKit");
 
-    // Add Field2d to SmartDashboard for Glass visualization
-    Tunables.getTable("SmartDashboard").publish("Field", field2d);
+    // Field visualization is read-only robot telemetry.
+    org.wpilib.telemetry.Telemetry.log("Drive/Field", field2d);
 
     // Start odometry thread
     PhoenixOdometryThread.getInstance().start();
@@ -229,8 +229,12 @@ public class Drive implements Mechanism {
     // Update gyro alert
     gyroDisconnectedAlert.set(!gyroInputs.connected && Constants.currentMode != Mode.SIM);
 
-    // Update Field2d for Glass visualization
+  }
+
+  /** Publish after command execution so same-cycle odometry resets appear immediately. */
+  public void publishField() {
     field2d.setRobotPose(getPose());
+    org.wpilib.telemetry.Telemetry.log("Drive/Field", field2d);
   }
 
   /**
@@ -239,6 +243,10 @@ public class Drive implements Mechanism {
    * @param speeds Speeds in meters/sec
    */
   public void runVelocity(ChassisVelocities speeds) {
+    if (RobotState.isDisabled()) {
+      for (var module : modules) module.stop();
+      return;
+    }
     // Heading correction: hold heading when no rotation is commanded
     /* if (Math.abs(speeds.omega) < 0.05) {
       if (headingTarget == null) {
@@ -317,6 +325,7 @@ public class Drive implements Mechanism {
 
   /** Runs the drive in a straight line with the specified drive output. */
   public void runCharacterization(double output) {
+    if (RobotState.isDisabled()) output = 0.0;
     for (int i = 0; i < 4; i++) {
       modules[i].runCharacterization(output);
     }

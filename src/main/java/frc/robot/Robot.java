@@ -26,6 +26,10 @@ public class Robot extends LoggedRobot {
   private Command autonomousCommand;
   private RobotContainer robotContainer;
 
+  RobotContainer getContainer() {
+    return robotContainer;
+  }
+
   public Robot() {
     // Record metadata
     Logger.recordMetadata("ProjectName", BuildConstants.MAVEN_NAME);
@@ -84,7 +88,7 @@ public class Robot extends LoggedRobot {
     // This must be called from the robot's periodic block in order for anything in
     // the Command-based framework to work.
     Scheduler.getDefault().run();
-    robotContainer.updateAutoPreview();
+    robotContainer.updateFieldVisualizations();
 
     // Return to non-RT thread priority (do not modify the first argument)
     // Threads.setCurrentThreadPriority(false, 10);
@@ -92,7 +96,9 @@ public class Robot extends LoggedRobot {
 
   /** This function is called once when the robot is disabled. */
   @Override
-  public void disabledInit() {}
+  public void disabledInit() {
+    if (autonomousCommand != null) Scheduler.getDefault().cancel(autonomousCommand);
+  }
 
   /** This function is called periodically when disabled. */
   @Override

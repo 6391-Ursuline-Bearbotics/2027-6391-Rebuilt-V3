@@ -24,6 +24,8 @@ $env:JAVA_HOME = 'C:\Users\Public\wpilib\2027_alpha7\jdk'
 
 Use the installed Alpha 7 Java Gradle template to verify packaging and deployment APIs. It uses the `application` plugin, `deployArtifact.configureApplication(application)`, and `wpi.java.configureApplication(application)`. Simulation uses `wpi.java.runSimWithDebugJni`; deployment JNI debugging is configured on the deployment artifact.
 
+Prefer the Alpha 7 WPILib VS Code installation. Alpha 5's simulator requests `simulateExternalJavaRelease` and reads `build/sim/release_java.json`; the compatibility task in `build.gradle` delegates to Alpha 7's `simulateExternalJava` and copies its `java.json` metadata to that filename. Alpha 7's actual application launch task is `run`.
+
 Report compilation, tests, simulation startup, and robot deployment separately. A successful build does not prove hardware operation. Do not deploy unless requested.
 
 ## Dependencies and migration
@@ -36,7 +38,7 @@ Current manifests declare Phoenix 6 `26.70.0-alpha-2`, REVLib `2027.0.0-alpha-8`
 - `GyroIONavX.java` and `VisionIOPhotonVisionSim.java` are preserved but excluded in `build.gradle` because compatible vendordeps are not installed. REAL uses Pigeon2 and Limelight. SIM explicitly alerts that camera simulation is disabled and supplies no vision observations. Verify compatible releases before enabling these integrations; do not relabel 2026 manifests as 2027.
 - Hood servos connect directly to SystemCore SmartIO PWM channels 0 and 1. `ShooterHoodIOServo` uses Alpha 7's `PWM` API, a 20 ms period, and the existing normalized angle mapping. Pulse endpoints are configurable in `ShooterConstants` (600–2400 microseconds); verify calibration with the installed servos.
 
-The Alpha 7 build and seven automated migration tests pass. Tests cover coroutine cleanup, deadline cancellation, trajectory markers, deployed path loading, disabled simulation startup, and SmartIO servo pulse mapping in HAL simulation. Hardware operation and deployment have not been verified.
+The Alpha 7 build and eight automated tests pass. Tests cover coroutine cleanup, deadline cancellation, trajectory markers, deployed path loading, simulation startup, SmartIO servo pulse mapping, and simulator functionality. Hardware operation and deployment have not been verified.
 
 Verified Alpha 7 API changes:
 
@@ -45,7 +47,7 @@ Verified Alpha 7 API changes:
 - Math uses `ChassisVelocities`, `SwerveModuleVelocity`, `Models`, and geometry `ZERO` constants. Swerve optimization, cosine scaling, and wheel velocity desaturation return new values; always use their results.
 - Field layouts use `org.wpilib.fields.Field` and `Fields`. Preserve the 2026 REBUILT field used by this robot; the toolchain year does not establish the game field.
 - Alerts require a unique identifier, text, and `Alert.Level`. REV reset/persist modes are in `com.revrobotics`.
-- Dashboard objects use `Tunables` rather than removed `SmartDashboard` methods. Preserve established NetworkTables paths when adapting dashboard input/output.
+- Use Alpha 7 `Tunables` for configuration and `Telemetry` for outputs. Do not use the legacy dashboard namespace. The chooser is `/Tunables/Autonomous/Chooser` (write `selected/tune`, read `selected/value`); the shoot-first delay is `/Tunables/Autonomous/ShootFirstDelaySecs`. Field2D outputs are `/Telemetry/Drive/Field` and `/Telemetry/Autonomous/Preview`. WPILib's Field2d type still lives in its historical `org.wpilib.smartdashboard` package.
 - Timestamp APIs are `Timer.getTimestamp()` (seconds) and `RobotController.getTime()` (nanoseconds). NetworkTables timestamps and last-change values are also nanoseconds in Alpha 7. Convert explicitly when calculating observation times or freshness checks; camera-provided latency remains milliseconds.
 
 ## Architecture
@@ -73,3 +75,11 @@ Preserve the IO pattern: hardware access belongs in hardware IO, physics in simu
 - Run the wrapper build after code or dependency changes. Use focused tests for scheduling, cancellation, timing, or behavior changes when practical.
 - Explicitly document temporarily excluded integrations and runtime limitations. Do not silently replace unavailable hardware with successful-looking no-op IO.
 - Update these instructions when the migration is resolved or the toolchain changes. Keep historical speculation out of standing instructions.
+
+## Simulator regression checks
+
+With the Alpha 7 JDK selected, run `./gradlew.bat test --tests frc.robot.SimulationFunctionalTest --console=plain` for deterministic 20 ms simulation. `./gradlew.bat simulateChecks --console=plain` replays the same checks at real-time speed with the simulator GUI (a 15 s initial pause allows opening the field views). These tasks construct the actual Robot and physics IO, feed HAL driver-station/controller data, use AdvantageKit's before/after hooks, and run the normal robot lifecycle and Commands v3 scheduler on one thread. Test classes run in separate JVMs to isolate global HAL/logger/scheduler state.
+
+Scenarios cover forward, strafe, rotation, joystick release, disabled joystick input, and Depot Cycle, Depot Inside, Safe, and mirrored Trench Depot Points on blue and red. Path checks assert position and heading, autonomous chooser tuning, preview mirroring, every published Field2D pose, cancellation on disable, and auto-to-teleop transitions. Safe includes its bounded shooting phase; Trench Depot Points checks its first drive phase and cancellation, not the complete later shooting/gather sequence. Simulation supplies no camera observations and does not model obstacles, bumps, collected game pieces, or physical shooter accuracy.
+
+Path tolerances are 35 cm peak/15 cm endpoint position and 20° peak/5° endpoint heading. Trench Depot Points has the largest measured transient error (about 27 cm/19°), while all checked endpoints are within 7 cm. The CSV trace is written to `build/reports/simulation/field-poses.csv`. Run `python scripts/plot_simulation.py` to render those recorded Field2D poses against their expected paths.

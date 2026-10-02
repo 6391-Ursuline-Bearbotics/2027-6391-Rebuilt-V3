@@ -89,6 +89,8 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    // Robot/AdvantageKit/HAL singletons must not leak between integration-test classes.
+    forkEvery = 1
     systemProperty 'junit.jupiter.extensions.autodetection.enabled', 'true'
 }
 
@@ -101,6 +103,40 @@ application.mainClass = ROBOT_MAIN_CLASS
 deployArtifact.configureApplication(application)
 wpi.java.configureApplication(application)
 wpi.java.configureTestTasks(test)
+
+// Replay the deterministic functionality checks at real-time speed with the simulator GUI.
+def simulateChecks = tasks.register('simulateChecks', JavaExec) {
+    group = 'Simulation'
+    description = 'Replay teleop and four autonomous routines on red and blue in Field2D.'
+    dependsOn testClasses, tasks.named('extractReleaseNative')
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'frc.robot.SimulationChecks'
+    jvmArgs '--add-opens=java.base/jdk.internal.vm=ALL-UNNAMED',
+            '--add-opens=java.base/java.lang=ALL-UNNAMED',
+            '--enable-native-access=ALL-UNNAMED'
+    doFirst {
+        def nativeDir = layout.buildDirectory.dir('jni/release').get().asFile
+        systemProperty 'java.library.path', nativeDir.absolutePath
+        environment 'PATH', nativeDir.absolutePath + File.pathSeparator + System.getenv('PATH')
+        environment 'LD_LIBRARY_PATH', nativeDir.absolutePath
+        environment 'DYLD_LIBRARY_PATH', nativeDir.absolutePath
+        def guiName = org.gradle.internal.os.OperatingSystem.current().isWindows()
+                ? 'halsim_gui.dll' : (org.gradle.internal.os.OperatingSystem.current().isMacOsX()
+                ? 'libhalsim_gui.dylib' : 'libhalsim_gui.so')
+        environment 'HALSIM_EXTENSIONS', new File(nativeDir, guiName).absolutePath
+    }
+}
+
+// Alpha 5's VS Code simulator requests the old task and metadata filename.
+// Generate both from Alpha 7's simulation configuration so existing launchers work.
+tasks.register('simulateExternalJavaRelease', Copy) {
+    group = 'Simulation'
+    description = 'Compatibility entry point for the Alpha 5 VS Code simulator.'
+    dependsOn tasks.named('simulateExternalJava')
+    from(layout.buildDirectory.file('sim/java.json'))
+    into(layout.buildDirectory.dir('sim'))
+    rename 'java.json', 'release_java.json'
+}
 
 jar {
     from('src') { into 'backup/src' }
