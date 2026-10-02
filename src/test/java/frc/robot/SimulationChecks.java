@@ -23,6 +23,8 @@ import org.wpilib.simulation.DriverStationSim;
 import org.wpilib.simulation.NiDsXboxControllerSim;
 import org.wpilib.simulation.SimHooks;
 import org.wpilib.system.Timer;
+import org.wpilib.system.RobotController;
+import org.wpilib.util.WPIUtilJNI;
 
 /** Physics IO simulation, driver-station lifecycle, joystick bindings, chooser and Field2D checks. */
 public final class SimulationChecks implements AutoCloseable {
@@ -40,6 +42,9 @@ public final class SimulationChecks implements AutoCloseable {
     this.playback = playback;
     assertTrue(HAL.initialize());
     SimHooks.pauseTiming();
+    // PhotonCameraSim schedules frames on the NT clock; advance it with HAL, not wall time.
+    WPIUtilJNI.enableMockTime();
+    WPIUtilJNI.setMockTime(RobotController.getMonotonicTime());
     DriverStationSim.resetData();
     DriverStationSim.setDsAttached(true);
     DriverStationSim.setSendError(playback);
@@ -65,6 +70,7 @@ public final class SimulationChecks implements AutoCloseable {
   private void tick() {
     DriverStationSim.notifyNewData();
     SimHooks.stepTiming(0.02);
+    WPIUtilJNI.setMockTime(RobotController.getMonotonicTime());
     robot.step();
     fieldMatchesPose();
     if (scenario.equals("Teleop")) recordPose(Timer.getTimestamp(), null);
@@ -214,7 +220,7 @@ public final class SimulationChecks implements AutoCloseable {
     Pose2d disabled = container.getDrive().getPose();
     ticks(0.5);
     assertEquals(0, disabled.getTranslation().getDistance(
-        container.getDrive().getPose().getTranslation()), 0.03, "Disabled auto must stop");
+        container.getDrive().getPose().getTranslation()), 0.03, name + " " + red + " disabled auto must stop");
     mode(RobotMode.TELEOPERATED, true, red);
     ticks(0.5);
     assertEquals(0, disabled.getTranslation().getDistance(
@@ -264,6 +270,7 @@ public final class SimulationChecks implements AutoCloseable {
     robot.close();
     fieldPoses.close();
     Logger.end();
+    WPIUtilJNI.disableMockTime();
     SimHooks.resumeTiming();
   }
 }

@@ -15,7 +15,7 @@ import org.wpilib.math.geometry.Transform3d;
 public class VisionConstants {
   // AprilTag layout
   public static Field aprilTagLayout =
-      Field.loadField(Fields.DEFAULT_FIELD);
+      Field.loadField(Fields.FRC_2026_REBUILT_WELDED);
 
   // Camera names, must match names configured on coprocessor
   public static String camera0Name = "limelight";

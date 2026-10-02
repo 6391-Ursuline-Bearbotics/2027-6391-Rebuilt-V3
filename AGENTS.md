@@ -30,15 +30,16 @@ Report compilation, tests, simulation startup, and robot deployment separately. 
 
 ## Dependencies and migration
 
-Current manifests declare Phoenix 6 `26.70.0-alpha-2`, REVLib `2027.0.0-alpha-8`, AdvantageKit `27.0.0-alpha-6`, and Choreo `2027.0.0-alpha-3`. Their alpha numbers need not match WPILib. Check actual artifacts and compatibility rather than trusting the filename or `wpilibYear`.
+Current manifests declare Phoenix 6 `26.70.0-alpha-2`, REVLib `2027.0.0-alpha-8`, AdvantageKit `27.0.0-alpha-6`, Choreo `2027.0.0-alpha-3`, and PhotonLib `dev-v2027.0.0-alpha-2-73-g4651dbae`. Their alpha numbers need not match WPILib. Check actual artifacts and compatibility rather than trusting the filename or `wpilibYear`.
 
 - Commands v3's official Alpha 7 artifact is `org.wpilib:commandsv3-java`. Obtain the manifest from the installed WPILib vendordeps directory.
 - Choreo's library-provided AutoFactory, routines, commands, and triggers use Commands v2. This project uses only its trajectory loader, samples, and transformations, with local Commands v3 adapters in `frc.robot.auto`. Do not add Commands v2 to bypass the conflict check.
 - AdvantageKit `@AutoLog` inputs require annotation processing. Generated `*InputsAutoLogged` files belong in build output, not handwritten source.
-- `GyroIONavX.java` and `VisionIOPhotonVisionSim.java` are preserved but excluded in `build.gradle` because compatible vendordeps are not installed. REAL uses Pigeon2 and Limelight. SIM explicitly alerts that camera simulation is disabled and supplies no vision observations. Verify compatible releases before enabling these integrations; do not relabel 2026 manifests as 2027.
+- REAL uses Pigeon2 and Limelight. PhotonVision simulation is enabled with the pinned dev manifest from the GitHub Dev release; its matching source explicitly targets WPILib Alpha 7 and its JNI supports SystemCore. Do not relabel 2026 manifests as 2027.
+- SIM uses PhotonVision with the explicit 2026 REBUILT tag layout, existing rear camera transform, and an ideal 50 FPS, zero-noise, zero-latency camera. Camera motion comes from independent wheel odometry (`Drive.getSimulationPose`), never the vision-corrected pose. Single-tag solutions use a pose reference to disambiguate. The dev multi-tag solver produced an invalid planar solve during regression testing; simulated solves more than 0.5 in the translation-plus-heading reference metric are dropped and counted at `/Telemetry/Vision/Simulation/RejectedSolves`. This is a simulation-only workaround using known simulated motion, not a real-camera accuracy guarantee. Revisit it when upgrading PhotonLib or adding latency/noise.
 - Hood servos connect directly to SystemCore SmartIO PWM channels 0 and 1. `ShooterHoodIOServo` uses Alpha 7's `PWM` API, a 20 ms period, and the existing normalized angle mapping. Pulse endpoints are configurable in `ShooterConstants` (600–2400 microseconds); verify calibration with the installed servos.
 
-The Alpha 7 build and eight automated tests pass. Tests cover coroutine cleanup, deadline cancellation, trajectory markers, deployed path loading, simulation startup, SmartIO servo pulse mapping, and simulator functionality. Hardware operation and deployment have not been verified.
+The Alpha 7 build and nine automated tests pass. Tests cover coroutine cleanup, deadline cancellation, trajectory markers, deployed path loading, simulation startup, SmartIO servo pulse mapping, simulator functionality, and actual PhotonVision tag observations with pose and timestamp validation. Hardware operation and deployment have not been verified.
 
 Verified Alpha 7 API changes:
 
@@ -60,7 +61,7 @@ Verified Alpha 7 API changes:
 - `subsystems/intake`: TalonFX deploy arm and roller, with jam recovery.
 - `subsystems/indexer`: TalonFX belt/kicker and REV SparkMax spinners.
 - `subsystems/shooter`: TalonFX flywheel, hood IO and distance lookup tables.
-- `subsystems/vision`: Limelight, optional PhotonVision simulation and QuestNav IO feeding drive pose estimation.
+- `subsystems/vision`: Limelight, PhotonVision simulation and QuestNav IO feeding drive pose estimation.
 - `util`: Phoenix configuration helpers, logged tunables, and `V3Commands` coroutine recipes. Cancellation cleanup belongs in `Command.onCancel`/`whenCanceled`; an abandoned coroutine does not reliably unwind Java `finally` blocks.
 - `src/main/deploy`: runtime assets and autonomous paths.
 
@@ -80,6 +81,6 @@ Preserve the IO pattern: hardware access belongs in hardware IO, physics in simu
 
 With the Alpha 7 JDK selected, run `./gradlew.bat test --tests frc.robot.SimulationFunctionalTest --console=plain` for deterministic 20 ms simulation. `./gradlew.bat simulateChecks --console=plain` replays the same checks at real-time speed with the simulator GUI (a 15 s initial pause allows opening the field views). These tasks construct the actual Robot and physics IO, feed HAL driver-station/controller data, use AdvantageKit's before/after hooks, and run the normal robot lifecycle and Commands v3 scheduler on one thread. Test classes run in separate JVMs to isolate global HAL/logger/scheduler state.
 
-Scenarios cover forward, strafe, rotation, joystick release, disabled joystick input, and Depot Cycle, Depot Inside, Safe, and mirrored Trench Depot Points on blue and red. Path checks assert position and heading, autonomous chooser tuning, preview mirroring, every published Field2D pose, cancellation on disable, and auto-to-teleop transitions. Safe includes its bounded shooting phase; Trench Depot Points checks its first drive phase and cancellation, not the complete later shooting/gather sequence. Simulation supplies no camera observations and does not model obstacles, bumps, collected game pieces, or physical shooter accuracy.
+Scenarios cover forward, strafe, rotation, joystick release, disabled joystick input, and Depot Cycle, Depot Inside, Safe, and mirrored Trench Depot Points on blue and red. Path checks assert position and heading, autonomous chooser tuning, preview mirroring, every published Field2D pose, cancellation on disable, and auto-to-teleop transitions. Safe includes its bounded shooting phase; Trench Depot Points checks its first drive phase and cancellation, not the complete later shooting/gather sequence. Tests synchronize the NetworkTables mock clock with stepped HAL time so PhotonVision frames follow simulation time. Simulation supplies ideal camera observations but does not model obstacles, bumps, collected game pieces, or physical shooter accuracy.
 
 Path tolerances are 35 cm peak/15 cm endpoint position and 20° peak/5° endpoint heading. Trench Depot Points has the largest measured transient error (about 27 cm/19°), while all checked endpoints are within 7 cm. The CSV trace is written to `build/reports/simulation/field-poses.csv`. Run `python scripts/plot_simulation.py` to render those recorded Field2D poses against their expected paths.

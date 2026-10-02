@@ -71,6 +71,7 @@ import frc.robot.subsystems.shooter.ShooterIOTalonFX;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.subsystems.vision.VisionIO;
 import frc.robot.subsystems.vision.VisionIOLimelight;
+import frc.robot.subsystems.vision.VisionIOPhotonVisionSim;
 import frc.robot.util.LoggedTunableNumber;
 import java.util.ArrayList;
 import java.util.List;
@@ -179,11 +180,7 @@ public class RobotContainer {
         vision =
             new Vision(
                 drive::addVisionMeasurement,
-                new VisionIO() {});
-        new org.wpilib.util.Alert(
-            "PhotonVisionSimulationUnavailable",
-            "Camera simulation disabled until a compatible PhotonVision vendordep is installed.",
-            org.wpilib.util.Alert.Level.LOW).set(true);
+                new VisionIOPhotonVisionSim(camera0Name, robotToCamera0, drive::getSimulationPose));
         intake = new Intake(new IntakeDeployIOSim(), new IntakeRollerIOSim());
         indexer =
             new Indexer(

@@ -22,15 +22,17 @@ import org.photonvision.PhotonCamera;
 import org.photonvision.simulation.PhotonCameraSim;
 import org.photonvision.simulation.SimCameraProperties;
 import org.photonvision.simulation.VisionSystemSim;
+import org.wpilib.telemetry.Telemetry;
 
 /** IO implementation for physics sim using PhotonVision simulator. */
-public class VisionIOPhotonVisionSim implements VisionIO {
-  private static VisionSystemSim visionSim;
+public class VisionIOPhotonVisionSim implements VisionIO, AutoCloseable {
+  private final VisionSystemSim visionSim;
 
   private final PhotonCamera camera;
   private final Transform3d robotToCamera;
   private final Supplier<Pose2d> poseSupplier;
   private final PhotonCameraSim cameraSim;
+  private int rejectedSolveCount;
 
   /**
    * Creates a new VisionIOPhotonVisionSim.
@@ -46,21 +48,27 @@ public class VisionIOPhotonVisionSim implements VisionIO {
     this.poseSupplier = poseSupplier;
 
     // Initialize vision sim
-    if (visionSim == null) {
-      visionSim = new VisionSystemSim("main");
-      visionSim.addAprilTags(aprilTagLayout);
-    }
+    visionSim = new VisionSystemSim(name);
+    visionSim.addAprilTags(aprilTagLayout);
 
     // Add sim camera
     var cameraProperties = new SimCameraProperties();
+    cameraProperties.setFPS(50);
     cameraSim = new PhotonCameraSim(camera, cameraProperties, aprilTagLayout);
     visionSim.addCamera(cameraSim, robotToCamera);
   }
 
   @Override
+  public void close() {
+    cameraSim.close();
+    camera.close();
+  }
+
+  @Override
   public void updateInputs(VisionIOInputs inputs) {
     // Update simulation
-    visionSim.update(poseSupplier.get());
+    Pose2d simPose = poseSupplier.get();
+    visionSim.update(simPose);
 
     inputs.connected = camera.isConnected();
 
@@ -119,6 +127,16 @@ public class VisionIOPhotonVisionSim implements VisionIO {
           Transform3d fieldToRobot = fieldToCamera.plus(robotToCamera.inverse());
           Pose3d robotPose = new Pose3d(fieldToRobot.getTranslation(), fieldToRobot.getRotation());
 
+          // A planar single tag has two PnP solutions. Perfect simulated corners can make
+          // their reprojection errors indistinguishable; use the current pose as a reference.
+          Transform3d alternateFieldToRobot = fieldToTarget
+              .plus(target.altCameraToTarget.inverse()).plus(robotToCamera.inverse());
+          Pose3d alternateRobotPose = new Pose3d(alternateFieldToRobot.getTranslation(),
+              alternateFieldToRobot.getRotation());
+          if (poseDistance(alternateRobotPose, simPose) < poseDistance(robotPose, simPose)) {
+            robotPose = alternateRobotPose;
+          }
+
           // Add tag ID
           tagIds.add((short) target.fiducialId);
 
@@ -136,6 +154,15 @@ public class VisionIOPhotonVisionSim implements VisionIO {
     }
 
     // Save pose observations to inputs object
+    // The dev OpenCV multi-tag solver occasionally returns the wrong planar solution even
+    // for perfect corners. In this zero-latency ideal-camera model, a solve this far from
+    // known simulated motion is invalid. Drop the frame, never replace it with ground truth.
+    poseObservations.removeIf(observation -> {
+      boolean invalid = poseDistance(observation.pose(), simPose) > 0.5;
+      if (invalid) rejectedSolveCount++;
+      return invalid;
+    });
+    Telemetry.log("Vision/Simulation/RejectedSolves", rejectedSolveCount);
     inputs.poseObservations = new PoseObservation[poseObservations.size()];
     for (int i = 0; i < poseObservations.size(); i++) {
       inputs.poseObservations[i] = poseObservations.get(i);
@@ -147,5 +174,10 @@ public class VisionIOPhotonVisionSim implements VisionIO {
     for (int id : tagIds) {
       inputs.tagIds[i++] = id;
     }
+  }
+
+  private static double poseDistance(Pose3d observation, Pose2d reference) {
+    return observation.toPose2d().getTranslation().getDistance(reference.getTranslation())
+        + Math.abs(observation.toPose2d().getRotation().minus(reference.getRotation()).getRadians());
   }
 }

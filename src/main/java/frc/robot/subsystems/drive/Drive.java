@@ -110,6 +110,10 @@ public class Drive implements Mechanism {
       };
   private SwerveDrivePoseEstimator poseEstimator =
       new SwerveDrivePoseEstimator(kinematics, rawGyroRotation, lastModulePositions, Pose2d.ZERO);
+  // Ideal simulated wheel motion, independent of camera corrections to the estimated pose.
+  private final org.wpilib.math.kinematics.SwerveDriveOdometry simulationOdometry =
+      new org.wpilib.math.kinematics.SwerveDriveOdometry(
+          kinematics, rawGyroRotation, lastModulePositions, Pose2d.ZERO);
 
   public Drive(
       GyroIO gyroIO,
@@ -191,6 +195,7 @@ public class Drive implements Mechanism {
 
       // Apply update
       poseEstimator.updateWithTime(sampleTimestamps[i], rawGyroRotation, modulePositions);
+      simulationOdometry.update(rawGyroRotation, modulePositions);
     }
 
     // Update tunable drive motor gains
@@ -435,6 +440,11 @@ public class Drive implements Mechanism {
     return poseEstimator.getEstimatedPosition();
   }
 
+  /** Ideal wheel odometry for camera simulation; vision must not move its own simulated robot. */
+  public Pose2d getSimulationPose() {
+    return simulationOdometry.getPose();
+  }
+
   /** Returns the current odometry rotation. */
   public Rotation2d getRotation() {
     return getPose().getRotation();
@@ -454,6 +464,7 @@ public class Drive implements Mechanism {
   /** Resets the current odometry pose. */
   public void setPose(Pose2d pose) {
     poseEstimator.resetPosition(rawGyroRotation, getModulePositions(), pose);
+    simulationOdometry.resetPosition(rawGyroRotation, getModulePositions(), pose);
   }
 
   /** Adds a new timestamped vision measurement. */

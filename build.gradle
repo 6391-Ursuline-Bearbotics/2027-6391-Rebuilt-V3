@@ -54,12 +54,6 @@ wpi.java.runSimWithDebugJni = false
 // Set this to true to enable desktop support.
 def includeDesktopSupport = true
 
-// Retain optional integrations until compatible 2027 vendordeps are installed.
-sourceSets.main.java {
-    exclude 'frc/robot/subsystems/drive/GyroIONavX.java'
-    exclude 'frc/robot/subsystems/vision/VisionIOPhotonVisionSim.java'
-}
-
 // Defining my dependencies. In this case, WPILib (+ friends), and vendor libraries.
 // Also defines JUnit 5.
 dependencies {
