@@ -8,8 +8,8 @@ import org.wpilib.simulation.DCMotorSim;
 
 public class ShooterIOSim implements ShooterIO {
   private static final DCMotor GEARBOX = DCMotor.getKrakenX60(1);
-  private static final double DEFAULT_SIM_KP = 0.05;
-  private static final double DEFAULT_SIM_KV = 0.12;
+  private static final double DEFAULT_SIM_KP = 0.05 / (2.0 * Math.PI);
+  private static final double DEFAULT_SIM_KV = 0.12 / (2.0 * Math.PI);
   private static final double DEFAULT_SIM_KS = 0.0;
 
   private final DCMotorSim leftSim;
@@ -85,6 +85,13 @@ public class ShooterIOSim implements ShooterIO {
   }
 
   @Override
+  public void setVelocityFOC(double velocityRadPerSec) {
+    // Approximate the hardware's FOC velocity request using this voltage-based motor model.
+    // Torque-current limits and the hardware bang-bang transient are not modeled here.
+    setVelocity(velocityRadPerSec);
+  }
+
+  @Override
   public void stop() {
     closedLoop = false;
     leftAppliedVolts = 0.0;
@@ -93,9 +100,10 @@ public class ShooterIOSim implements ShooterIO {
 
   @Override
   public void setGains(double kP, double kV, double kS) {
-    leftController.setP(kP);
-    rightController.setP(kP);
-    simKv = kV;
+    // Phoenix gains use rotations/sec; this model and its PID use radians/sec.
+    leftController.setP(kP / (2.0 * Math.PI));
+    rightController.setP(kP / (2.0 * Math.PI));
+    simKv = kV / (2.0 * Math.PI);
     simKs = kS;
   }
 }

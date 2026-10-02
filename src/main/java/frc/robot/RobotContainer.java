@@ -353,12 +353,11 @@ public class RobotContainer {
     // X: spin up shooter, aim at hub for 1s, then lock wheels in X
     drv.x()
         .onTrue(
-            Command.sequence(
-                    Command.noRequirements(co -> shooter.setGoal(Shooter.Goal.SHOOT))
-                        .named("Spin Up Shooter"),
-                    aimAtHub().withTimeout(Seconds.of(1.0)),
-                    drive.run(co -> drive.stopWithX()).named("Lock X"))
-                .withAutomaticName());
+            Command.noRequirements(co -> {
+              shooter.setGoal(Shooter.Goal.SHOOT);
+              co.await(aimAtHub().withTimeout(Seconds.of(1.0)));
+              co.await(drive.run(lock -> drive.stopWithX()).named("Lock X"));
+            }).named("Aim Then Lock X"));
 
     // Start: reset gyro yaw to zero (field-forward)
     drv.start()
@@ -372,15 +371,11 @@ public class RobotContainer {
     // Right bumper: idle shooter and move hood to 26°, wait for arrival
     drv.rightBumper()
         .onTrue(
-            Command.sequence(
-                    Command.noRequirements(
-                            co -> {
-                              shooter.setGoal(Shooter.Goal.IDLE);
-                              shooter.setHoodAngle(26.0);
-                            })
-                        .named("Idle Shooter"),
-                    Command.waitUntil(() -> shooter.isHoodAtAngle(26.0, 1.0)).named("Wait For Hood"))
-                .withAutomaticName());
+            Command.noRequirements(co -> {
+              shooter.setGoal(Shooter.Goal.IDLE);
+              shooter.setHoodAngle(26.0);
+              co.waitUntil(() -> shooter.isHoodAtAngle(26.0, 1.0));
+            }).named("Idle Shooter And Position Hood"));
 
     // Operator intake controls
     op.a()
@@ -883,6 +878,10 @@ public class RobotContainer {
   Drive getDrive() {
     return drive;
   }
+
+  Intake getIntake() { return intake; }
+  Indexer getIndexer() { return indexer; }
+  Shooter getShooter() { return shooter; }
 
   public String getSelectedAutoName() {
     return autoChooser.selectedName();

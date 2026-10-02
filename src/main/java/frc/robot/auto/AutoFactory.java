@@ -4,7 +4,6 @@ import choreo.Choreo;
 import choreo.trajectory.SwerveSample;
 import choreo.trajectory.Trajectory;
 import choreo.util.ChoreoAllianceFlipUtil;
-import frc.robot.util.V3Commands;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -47,9 +46,9 @@ public final class AutoFactory {
   public AutoRoutine newRoutine(String name) { return new AutoRoutine(this, name); }
 
   public Command resetOdometry(Supplier<Optional<Pose2d>> pose) {
-    return V3Commands.runOnce(() -> {
+    return drive.run(co -> {
       Pose2d initial = pose.get().orElseThrow(() -> new IllegalStateException("No initial auto pose"));
       resetPose.accept(flip() ? ChoreoAllianceFlipUtil.flip(initial) : initial);
-    }, drive);
+    }).named("Reset Auto Odometry");
   }
 }

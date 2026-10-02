@@ -2,7 +2,6 @@ package frc.robot.auto;
 
 import choreo.trajectory.SwerveSample;
 import choreo.trajectory.Trajectory;
-import frc.robot.util.V3Commands;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -25,7 +24,8 @@ public final class AutoTrajectory {
   public Optional<Pose2d> getInitialPose() { return trajectory.getInitialPose(factory.flip()); }
   public Optional<Pose2d> getFinalPose() { return trajectory.getFinalPose(factory.flip()); }
   public Command resetOdometry() {
-    return V3Commands.runOnce(() -> factory.resetPose.accept(getInitialPose().orElseThrow()), factory.drive);
+    return factory.drive.run(co -> factory.resetPose.accept(getInitialPose().orElseThrow()))
+        .named("Reset " + trajectory.name());
   }
   public Marker atTime(String name) { return new Marker(name); }
   public final class Marker {

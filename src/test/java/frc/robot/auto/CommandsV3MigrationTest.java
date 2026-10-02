@@ -49,6 +49,58 @@ class CommandsV3MigrationTest {
   }
 
   @Test
+  void routineFlowJoinsPathsAndCancelsScopedChildrenOnExitAndRestart() {
+    var factory = new AutoFactory(pose -> {}, sample -> {}, false, drive);
+    var routine = factory.newRoutine("Coroutine flow");
+    var runs = new AtomicInteger();
+    var stops = new AtomicInteger();
+    var canceled = new AtomicInteger();
+    var elapsed = new ArrayList<Double>();
+    routine.onCancel(canceled::incrementAndGet);
+    routine.run(co -> {
+      var timer = org.wpilib.system.Timer.createStarted(); // Fresh on each restart.
+      co.fork(drive.runRepeatedly(runs::incrementAndGet).whenCanceled(stops::incrementAndGet)
+          .named("Scoped drive"));
+      co.wait(org.wpilib.units.Units.Seconds.of(0.06));
+      elapsed.add(timer.get());
+    });
+    Command command = routine.cmd();
+    for (int restart = 1; restart <= 2; restart++) {
+      scheduler.schedule(command);
+      for (int i = 0; i < 8; i++) tick();
+      assertEquals(restart, stops.get(), "Flow return must cancel its drive child");
+      assertEquals(restart, elapsed.size());
+      assertTrue(elapsed.getLast() >= 0.06 && elapsed.getLast() <= 0.10);
+      int before = runs.get();
+      tick();
+      assertEquals(before, runs.get(), "Parked routine must not keep the completed phase alive");
+      scheduler.cancel(command);
+      assertEquals(restart, canceled.get());
+      assertEquals(restart, stops.get(), "Canceling parked routine must not clean a child twice");
+    }
+  }
+
+  @Test
+  void timedReadinessWaitBranchesAndCancellationDoesNotContinueToFeed() {
+    var feeds = new AtomicInteger();
+    var timeouts = new AtomicInteger();
+    Command flow = Command.noRequirements(co -> {
+      var result = co.waitUntil(() -> false, org.wpilib.units.Units.Seconds.of(0.06));
+      if (result.timedOut()) timeouts.incrementAndGet();
+      feeds.incrementAndGet();
+    }).named("Bounded readiness");
+    scheduler.schedule(flow);
+    tick();
+    scheduler.cancel(flow);
+    for (int i = 0; i < 8; i++) tick();
+    assertEquals(0, feeds.get());
+    scheduler.schedule(flow);
+    for (int i = 0; i < 8; i++) tick();
+    assertEquals(1, timeouts.get());
+    assertEquals(1, feeds.get());
+  }
+
+  @Test
   void decoratorsCleanUpOnceOnCompletionAndCancellation() {
     var starts = new AtomicInteger();
     var ends = new ArrayList<Boolean>();

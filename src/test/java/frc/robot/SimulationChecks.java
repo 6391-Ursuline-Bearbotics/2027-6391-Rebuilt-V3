@@ -8,6 +8,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.io.IOException;
 import org.littletonrobotics.junction.Logger;
 import org.littletonrobotics.junction.SteppedRobot;
 import org.wpilib.command3.Scheduler;
@@ -33,6 +36,7 @@ public final class SimulationChecks implements AutoCloseable {
   private final NiDsXboxControllerSim joystick;
   private final boolean playback;
   private final StructArraySubscriber<Pose2d> fieldPoses;
+  private final Map<Path, byte[]> savedPreferences = new HashMap<>();
   private String scenario = "initialization";
   private boolean redAlliance;
   private final List<String> rows = new ArrayList<>(List.of(
@@ -40,6 +44,13 @@ public final class SimulationChecks implements AutoCloseable {
 
   private SimulationChecks(boolean playback) {
     this.playback = playback;
+    if (!playback) {
+      for (String name : List.of("networktables.json", "networktables.json.bck")) {
+        Path path = Path.of(name);
+        try { savedPreferences.put(path, Files.exists(path) ? Files.readAllBytes(path) : null); }
+        catch (IOException e) { throw new RuntimeException(e); }
+      }
+    }
     assertTrue(HAL.initialize());
     SimHooks.pauseTiming();
     // PhotonCameraSim schedules frames on the NT clock; advance it with HAL, not wall time.
@@ -50,6 +61,11 @@ public final class SimulationChecks implements AutoCloseable {
     DriverStationSim.setSendError(playback);
     robot = new SteppedRobot();
     container = ((Robot) robot).getContainer();
+    if (!playback) {
+      // Headless checks must not save their temporary tuning values as operator preferences.
+      NetworkTableInstance.getDefault()
+          .getTopic("/Tunables/Autonomous/ShootFirstDelaySecs/value").setPersistent(false);
+    }
     fieldPoses = NetworkTableInstance.getDefault()
         .getStructArrayTopic("/Telemetry/Drive/Field/Robot", Pose2d.struct)
         .subscribe(new Pose2d[0]);
@@ -262,6 +278,91 @@ public final class SimulationChecks implements AutoCloseable {
     run(true);
   }
 
+  /** Exercise later coroutine phases, not just first-path tracking. */
+  public static void runCoroutinePhases() throws Exception {
+    try (var checks = new SimulationChecks(false)) {
+      for (boolean red : new boolean[] {false, true}) {
+        for (String name : List.of("Shoot Only", "Safe (Shoot First)",
+            "Depot Double Pass", "Trench Depot Points", "Trench Outpost Disrupt",
+            "Trench Depot Follow", "Depot Single Pass Shoot On Move")) {
+          checks.neutral();
+          checks.mode(RobotMode.AUTONOMOUS, false, red);
+          var nt = NetworkTableInstance.getDefault();
+          nt.getEntry("/Tunables/Autonomous/Chooser/selected/tune").setString(name);
+          nt.flushLocal();
+          nt.waitForListenerQueue(1);
+          checks.ticks(0.1);
+          assertEquals(name, checks.container.getSelectedAutoName());
+          checks.mode(RobotMode.AUTONOMOUS, true, red);
+          boolean fed = false;
+          boolean droveAfterFeeding = false;
+          boolean gathered = false;
+          for (int cycle = 0; cycle < 2000; cycle++) { // Up to 40 s to reach later phases.
+            checks.tick();
+            fed |= checks.container.getIndexer().getGoal()
+                == frc.robot.subsystems.indexer.Indexer.Goal.FEED;
+            var velocity = checks.container.getDrive().getChassisVelocities();
+            if (fed && checks.container.getIndexer().getGoal()
+                == frc.robot.subsystems.indexer.Indexer.Goal.IDLE
+                && Math.hypot(velocity.vx, velocity.vy) > 0.3) droveAfterFeeding = true;
+            gathered |= Scheduler.getDefault().getRunningCommands().stream()
+                .anyMatch(command -> command.name().equals("Gather Current Limit"));
+          }
+          assertTrue(fed, name + " must reach feeding on " + (red ? "red" : "blue")
+              + "; goal=" + checks.container.getShooter().getGoal()
+              + "; target RPM=" + checks.container.getShooter().getCommandedRPM()
+              + "; measured RPM=" + checks.container.getShooter().getAverageVelocityRPM()
+              + "; running=" + Scheduler.getDefault().getRunningCommands().stream()
+                  .map(Command -> Command.name()).toList());
+          if (name.contains("Trench") || name.equals("Depot Double Pass")) {
+            assertTrue(droveAfterFeeding, name + " must leave shooting and resume driving");
+          }
+          if (name.equals("Trench Depot Follow")) {
+            assertTrue(gathered, "Follow must reach its scoped gather-current monitor");
+          }
+          checks.mode(RobotMode.AUTONOMOUS, false, red);
+          checks.ticks(0.2);
+          assertEquals(frc.robot.subsystems.shooter.Shooter.Goal.IDLE,
+              checks.container.getShooter().getGoal(), name + " shooter cancellation");
+          assertEquals(frc.robot.subsystems.indexer.Indexer.Goal.IDLE,
+              checks.container.getIndexer().getGoal(), name + " indexer cancellation");
+          assertEquals(frc.robot.subsystems.intake.Intake.Goal.IDLE,
+              checks.container.getIntake().getGoal(), name + " intake cancellation");
+          assertTrue(Scheduler.getDefault().getRunningCommands().stream()
+              .noneMatch(command -> command.name().contains("Aim With Vision Creep")
+                  || command.name().contains("Gather Current Limit")
+                  || command.name().contains("Moving Shot Drive")
+                  || command.name().contains("Intake Periodic Auto Rehome")),
+              name + " must cancel phase children");
+          System.out.println("PASS coroutine phases " + name + " " + (red ? "red" : "blue"));
+        }
+      }
+      // A long preload delay overlaps the shot instead of starting after it.
+      checks.mode(RobotMode.AUTONOMOUS, false, false);
+      var nt = NetworkTableInstance.getDefault();
+      nt.getEntry("/Tunables/Autonomous/ShootFirstDelaySecs/tune").setDouble(6.0);
+      nt.getEntry("/Tunables/Autonomous/Chooser/selected/tune").setString("Safe (Shoot First)");
+      nt.flushLocal();
+      nt.waitForListenerQueue(1);
+      checks.ticks(0.1);
+      checks.mode(RobotMode.AUTONOMOUS, true, false);
+      Pose2d start = checks.container.getDrive().getPose();
+      double started = Timer.getTimestamp();
+      double firstMotion = Double.NaN;
+      for (int cycle = 0; cycle < 400; cycle++) {
+        checks.tick();
+        if (start.getTranslation().getDistance(checks.container.getDrive().getPose().getTranslation()) > 0.03) {
+          firstMotion = Timer.getTimestamp() - started;
+          break;
+        }
+      }
+      assertTrue(firstMotion >= 6 && firstMotion < 6.4,
+          "Preload delay must overlap shooting; first motion at " + firstMotion);
+      checks.mode(RobotMode.AUTONOMOUS, false, false);
+      nt.getEntry("/Tunables/Autonomous/ShootFirstDelaySecs/tune").setDouble(0.0);
+    }
+  }
+
   @Override public void close() {
     neutral();
     DriverStationSim.setEnabled(false);
@@ -272,5 +373,14 @@ public final class SimulationChecks implements AutoCloseable {
     Logger.end();
     WPIUtilJNI.disableMockTime();
     SimHooks.resumeTiming();
+    if (!playback) {
+      NetworkTableInstance.getDefault().stopServer();
+      savedPreferences.forEach((path, bytes) -> {
+        try {
+          if (bytes == null) Files.deleteIfExists(path);
+          else Files.write(path, bytes);
+        } catch (IOException e) { throw new RuntimeException(e); }
+      });
+    }
   }
 }

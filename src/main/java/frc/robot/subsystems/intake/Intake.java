@@ -463,9 +463,13 @@ public class Intake implements Mechanism {
    * parallel with other intake goal commands.
    */
   public Command periodicAutoRehomeCommand() {
-    return V3Commands.named(V3Commands.repeatedly(V3Commands.sequence(V3Commands.waitSeconds(1.5), V3Commands.runOnce(() -> setGoal(Goal.IDLE)))
-        )
-        , "Intake Periodic Auto Rehome");
+    return Command.noRequirements(co -> {
+      while (true) {
+        co.wait(org.wpilib.units.Units.Seconds.of(1.5));
+        setGoal(Goal.IDLE);
+        co.yield(); // Preserve the original repeat boundary's scheduler cycle.
+      }
+    }).named("Intake Periodic Auto Rehome");
   }
 
   public Command ejectCommand() {
