@@ -29,6 +29,7 @@ public class LoggedTunableNumber implements DoubleSupplier {
    */
   public LoggedTunableNumber(String dashboardKey) {
     this.key = tableKey + "/" + dashboardKey;
+    HubConfiguration.register(this.key, this::get);
   }
 
   /**

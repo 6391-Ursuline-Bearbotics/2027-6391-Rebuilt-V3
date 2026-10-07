@@ -64,6 +64,8 @@ public class AutoRoutines {
   static {
     org.wpilib.tunable.Tunables.getTable("Autonomous")
         .publish("ShootFirstDelaySecs", shootFirstDelaySecs);
+    frc.robot.util.HubConfiguration.register(
+        "Autonomous/ShootFirstDelaySecs", shootFirstDelaySecs::get);
   }
 
   // Gather clump detection: roller stator amps above this threshold triggers slow-down.
