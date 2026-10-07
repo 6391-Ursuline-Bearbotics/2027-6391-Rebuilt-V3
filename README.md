@@ -155,6 +155,14 @@ Hardware access belongs in hardware IO implementations; physics belongs in simul
 
 REAL uses Pigeon2 and Limelight. Hood servos plug directly into SystemCore SmartIO PWM channels **0 and 1**. The configured period is 20 ms, with pulse endpoints of 600–2400 microseconds and a normalized 20–45° angle mapping. Verify calibration with the installed servos before hardware use. Preserve the existing CAN IDs, inversions, gearing, current limits, gains, and field conventions when modifying behavior.
 
+## Swerve SDK diagnostics
+
+REAL module IO records `phoenix6-status-observation-1` fields under `/Drive/Module0` through `/Drive/Module3`. It copies drive velocity and turn position once after the existing refreshes, logs those exact raw control-input values with individual/group SDK status and separate robot-nanosecond/Phoenix-second clock bookends, and retains primitive copies of all SDK timestamps. Receipt comparisons and repeated-value comparisons are separate; equal values do not establish staleness.
+
+These observations do not qualify physical acquisition freshness or native timestamp availability. Both qualification fields remain false; SIM and old REPLAY inputs keep unavailable defaults. No extra CAN refreshes, frame-rate changes, actuator requests or control conversions are introduced. Added logging/Java overhead still needs hardware measurement. The hub's [status/timing contract and bench worksheet](https://github.com/6391-Ursuline-Bearbotics/robot-test-hub/blob/main/docs/SWERVE_STATUS_TIMING.md) describe the exact semantics and limits.
+
+The Alpha 7/JDK 25 wrapper build passes with 42 tests, including ten pure SDK-copy/timing/AutoLog regressions and the existing simulation/recording/status tests. This verifies compilation and local test behavior; no hardware deployment or operation has been performed.
+
 ## Dependencies
 
 | Dependency | Pinned version |
