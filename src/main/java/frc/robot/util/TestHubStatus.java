@@ -46,6 +46,10 @@ public final class TestHubStatus {
     Logger.recordMetadata("HubSchemaVersion", "1");
   }
 
+  /** Immutable boot identity shared by passive instrumentation, never a second boot UUID. */
+  public String robotId() { return state.robotId; }
+  public String bootId() { return state.bootId; }
+
   /** Called after normal scheduler work; still called during every disabled loop. */
   public void periodic() {
     periodic(null);

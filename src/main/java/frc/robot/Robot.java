@@ -28,6 +28,7 @@ public class Robot extends LoggedRobot {
   private Command autonomousCommand;
   private RobotContainer robotContainer;
   private frc.robot.hub.RotatingLogReceiver testHubRecording;
+  private frc.robot.hub.TestHubMarkers testHubMarkers;
   private final TestHubStatus hubStatus = new TestHubStatus(
       () -> robotContainer == null ? "unavailable" : robotContainer.getSelectedAutoName());
 
@@ -83,6 +84,10 @@ public class Robot extends LoggedRobot {
     // Instantiate our RobotContainer. This will perform all our button bindings,
     // and put our autonomous chooser on the dashboard.
     robotContainer = new RobotContainer();
+    testHubMarkers = frc.robot.hub.TestHubMarkers.create(Constants.currentMode,
+        hubStatus.robotId(), hubStatus.bootId(),
+        Boolean.getBoolean("frc.testHubMarkersEnabled"),
+        org.wpilib.networktables.NetworkTableInstance.getDefault());
   }
 
   /** This function is called periodically during all modes. */
@@ -101,6 +106,7 @@ public class Robot extends LoggedRobot {
     robotContainer.updateFieldVisualizations();
     var health = testHubRecording == null ? null : testHubRecording.health();
     hubStatus.periodic(health == null ? null : health.activeSegmentId());
+    testHubMarkers.periodic();
     if (health != null) { // One snapshot only; the scheduler performs no file I/O.
       Logger.recordOutput("TestHubRecording/WriteState", health.writeState());
       Logger.recordOutput("TestHubRecording/LastError", health.lastError());
@@ -176,4 +182,10 @@ public class Robot extends LoggedRobot {
   /** This function is called periodically whilst in simulation. */
   @Override
   public void simulationPeriodic() {}
+
+  @Override
+  public void close() {
+    if (testHubMarkers != null) testHubMarkers.close();
+    super.close();
+  }
 }
