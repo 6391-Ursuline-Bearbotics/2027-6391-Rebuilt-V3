@@ -7,6 +7,8 @@
 
 package frc.robot;
 
+import frc.robot.util.TestHubStatus;
+
 import org.wpilib.command3.Command;
 import org.wpilib.command3.Scheduler;
 import org.littletonrobotics.junction.LogFileUtil;
@@ -25,37 +27,51 @@ import org.littletonrobotics.junction.wpilog.WPILOGWriter;
 public class Robot extends LoggedRobot {
   private Command autonomousCommand;
   private RobotContainer robotContainer;
+  private frc.robot.hub.RotatingLogReceiver testHubRecording;
+  private frc.robot.hub.TestHubMarkers testHubMarkers;
+  private final TestHubStatus hubStatus = new TestHubStatus(
+      () -> robotContainer == null ? "unavailable" : robotContainer.getSelectedAutoName());
 
   RobotContainer getContainer() {
     return robotContainer;
   }
 
+  private void addTestHubRecording(java.nio.file.Path directory) {
+    testHubRecording = new frc.robot.hub.RotatingLogReceiver(directory);
+    Logger.addDataReceiver(testHubRecording);
+    Logger.recordMetadata("TestHubRecording", Constants.currentMode.name() + "-opt-in-experimental");
+  }
+
   public Robot() {
-    // Record metadata
-    Logger.recordMetadata("ProjectName", BuildConstants.MAVEN_NAME);
-    Logger.recordMetadata("BuildDate", BuildConstants.BUILD_DATE);
-    Logger.recordMetadata("GitSHA", BuildConstants.GIT_SHA);
-    Logger.recordMetadata("GitDate", BuildConstants.GIT_DATE);
-    Logger.recordMetadata("GitBranch", BuildConstants.GIT_BRANCH);
-    Logger.recordMetadata(
-        "GitDirty",
-        switch (BuildConstants.DIRTY) {
-          case 0 -> "All changes committed";
-          case 1 -> "Uncommitted changes";
-          default -> "Unknown";
-        });
+    this(RobotContainer::new);
+  }
+
+  /** Container injection for lifecycle simulation checks. */
+  public Robot(java.util.function.Supplier<RobotContainer> containerFactory) {
+    // Fresh build/source identity and per-execution boot metadata.
+    hubStatus.recordMetadata();
+    var recordingDirectory = frc.robot.hub.RecordingOptions.directory(Constants.currentMode,
+        System.getProperty("frc.testHubRecordingDir", ""));
 
     // Set up data receivers & replay source
     switch (Constants.currentMode) {
       case REAL:
         // Running on a real robot, log to a USB stick ("/U/logs")
-        Logger.addDataReceiver(new WPILOGWriter());
+        if (recordingDirectory == null) {
+          Logger.addDataReceiver(new WPILOGWriter());
+        } else {
+          // Explicit experimental opt-in selects one file writer, avoiding duplicate USB writes.
+          addTestHubRecording(recordingDirectory);
+        }
         Logger.addDataReceiver(new NT4Publisher());
         break;
 
       case SIM:
         // Running a physics simulator, log to NT
         Logger.addDataReceiver(new NT4Publisher());
+        if (recordingDirectory != null) {
+          addTestHubRecording(recordingDirectory);
+        }
         break;
 
       case REPLAY:
@@ -72,7 +88,11 @@ public class Robot extends LoggedRobot {
 
     // Instantiate our RobotContainer. This will perform all our button bindings,
     // and put our autonomous chooser on the dashboard.
-    robotContainer = new RobotContainer();
+    robotContainer = containerFactory.get();
+    testHubMarkers = frc.robot.hub.TestHubMarkers.create(Constants.currentMode,
+        hubStatus.robotId(), hubStatus.bootId(),
+        Boolean.getBoolean("frc.testHubMarkersEnabled"),
+        org.wpilib.networktables.NetworkTableInstance.getDefault());
   }
 
   /** This function is called periodically during all modes. */
@@ -89,6 +109,16 @@ public class Robot extends LoggedRobot {
     // the Command-based framework to work.
     Scheduler.getDefault().run();
     robotContainer.updateFieldVisualizations();
+    var health = testHubRecording == null ? null : testHubRecording.health();
+    hubStatus.periodic(health == null ? null : health.activeSegmentId());
+    testHubMarkers.periodic();
+    if (health != null) { // One snapshot only; the scheduler performs no file I/O.
+      Logger.recordOutput("TestHubRecording/WriteState", health.writeState());
+      Logger.recordOutput("TestHubRecording/LastError", health.lastError());
+      Logger.recordOutput("TestHubRecording/ActiveSegmentId", health.activeSegmentId() == null ? "" : health.activeSegmentId());
+      Logger.recordOutput("TestHubRecording/PendingDigests", health.pendingDigests());
+      Logger.recordOutput("TestHubRecording/IntegrationQualified", false);
+    }
 
     // Return to non-RT thread priority (do not modify the first argument)
     // Threads.setCurrentThreadPriority(false, 10);
@@ -157,4 +187,10 @@ public class Robot extends LoggedRobot {
   /** This function is called periodically whilst in simulation. */
   @Override
   public void simulationPeriodic() {}
+
+  @Override
+  public void close() {
+    if (testHubMarkers != null) testHubMarkers.close();
+    super.close();
+  }
 }

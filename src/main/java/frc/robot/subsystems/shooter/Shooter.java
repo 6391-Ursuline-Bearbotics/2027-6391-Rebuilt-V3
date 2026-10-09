@@ -234,10 +234,20 @@ public class Shooter implements Mechanism {
     return radPerSecToRPM(avgRadPerSec);
   }
 
-  /** Returns true if both motors are within tolerance of the commanded setpoint. */
+  /** Both flywheels must be reporting and the hood output must be allocated. */
+  @AutoLogOutput(key = "Shooter/Available")
+  public boolean isAvailable() {
+    return inputs.leftConnected && inputs.rightConnected && isHoodOutputAvailable();
+  }
+
+  public boolean isHoodOutputAvailable() {
+    return hoodInputs.outputAvailable;
+  }
+
+  /** Returns true only with live feedback and both motors within the setpoint tolerance. */
   @AutoLogOutput(key = "Shooter/AtSetpoint")
   public boolean isAtSetpoint() {
-    if ((goal != Goal.SHOOT && goal != Goal.PASS) || commandedRPM == 0.0) {
+    if (!isAvailable() || (goal != Goal.SHOOT && goal != Goal.PASS) || commandedRPM == 0.0) {
       return false;
     }
     double tol = goal == Goal.PASS ? passToleranceRPM.get() : toleranceRPM.get();
@@ -253,15 +263,27 @@ public class Shooter implements Mechanism {
     hoodIO.updateInputs(hoodInputs);
     Logger.processInputs("Shooter/Hood", hoodInputs);
 
+    org.wpilib.telemetry.Telemetry.log("Shooter/Available", isAvailable());
+    org.wpilib.telemetry.Telemetry.log("Shooter/Hood/OutputAvailable", isHoodOutputAvailable());
+    // Keep the aiming geometry current even on a chassis with no shooter.
+    updateAimTarget();
+    if (!isAvailable()) {
+      io.stop();
+      hoodIO.stop();
+      commandedRPM = 0;
+      spunUp = false;
+      jammed = false;
+      jamTimer.restart();
+      updateAlerts();
+      return;
+    }
+
     if (RobotState.isDisabled()) {
       io.stop();
       hoodIO.stop();
       updateAlerts();
       return;
     }
-
-    // Always update distance/aim target so logging reflects current value regardless of goal
-    updateAimTarget();
 
     // Update gains if tuned
     LoggedTunableNumber.ifChanged(
@@ -556,20 +578,20 @@ public class Shooter implements Mechanism {
     return jammed;
   }
 
-  /** Returns the current hood angle in degrees as reported by the servo feedback. */
+  /** Returns the hood command estimate in degrees; PWM provides no position feedback. */
   public double getHoodAngleDeg() {
     return hoodInputs.positionDeg;
   }
 
-  /** Returns true if the hood is within toleranceDeg of the target angle. */
+  /** Compares the hood command estimate; this does not confirm physical servo arrival. */
   public boolean isHoodAtAngle(double targetDeg, double toleranceDeg) {
-    return Math.abs(hoodInputs.positionDeg - targetDeg) < toleranceDeg;
+    return isHoodOutputAvailable() && Math.abs(hoodInputs.positionDeg - targetDeg) < toleranceDeg;
   }
 
   /** Returns true if the hood is at or below 26 degrees. */
   @AutoLogOutput(key = "Shooter/HoodAtOrBelow26Deg")
   public boolean isHoodAtOrBelow26Deg() {
-    return hoodInputs.positionDeg <= 26.0;
+    return isHoodOutputAvailable() && hoodInputs.positionDeg <= 26.0;
   }
 
   private void updateAlerts() {
@@ -610,7 +632,8 @@ public class Shooter implements Mechanism {
 
   /** Run shooter motors at a raw voltage for characterization. Bypasses goal logic. */
   public void runCharacterization(double volts) {
-    io.setVoltage(volts);
+    if (isAvailable()) io.setVoltage(volts);
+    else io.stop();
   }
 
   /** Returns the average velocity of both shooter motors in rad/s for characterization. */

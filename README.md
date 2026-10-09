@@ -31,6 +31,28 @@ For hardware deployment, use the WPILib deploy action or, when connected to the 
 
 The deployment target is SystemCore, team 6391. Files from `src/main/deploy` deploy to `/home/systemcore/deploy`. Hardware operation and deployment have not been verified by the simulator tests.
 
+## Running with only a drive base
+
+No source switches or alternate deployment are required. REAL still constructs every hardware IO; missing CAN devices retain disconnected alerts and logged inputs. Optional mechanism control uses current refresh validity rather than a connection debounce that can initially report absent devices as present. SDK configuration attempts at startup remain bounded, so absent devices may add startup time and vendor diagnostics.
+
+- Intake requires its deploy motor and roller. Missing either stops both, discards hard-stop/jam state, and prevents stale roller current from slowing the drive. Valid feedback permits control again, with hard-stop state reacquired.
+- Shooter requires both flywheels and an allocated hood output. Missing feedback stops the flywheels and prevents readiness from stale speed readings. Characterization follows the same availability checks.
+- Indexer requires its belt and kicker. Feeding also requires shooter availability; eject remains independent. Auxiliary spinners are checked individually, so one missing spinner does not disable an otherwise available belt/kicker.
+- Autos skip unavailable stationary scoring phases and continue their drive paths. Losing feedback during a scoring phase cancels its scoped aiming/rehome children. Moving-shot readiness remains unbounded with healthy hardware, but missing hardware ends the feeding wait while its depot drive continues. The configured shoot-first minimum delay still applies; skipped scoring also skips the static-shot rush hold.
+- Shot buttons cannot take over teleop aiming when scoring hardware is absent. A loss during a gated shot releases aiming and feeding. Missing cameras leave wheel odometry available, and disconnected camera poses cannot correct it.
+
+Availability is published at `/Telemetry/Intake/Available`, `/Telemetry/Indexer/Available`, `/Telemetry/Shooter/Available`, `/Telemetry/Shooter/Hood/OutputAvailable`, and `/Telemetry/Autonomous/ScoringAvailable`. Disconnection alerts and raw IO logs remain available. Availability describes reported feedback and output allocation; it does not prove that a mechanism can score.
+
+SmartIO PWM cannot detect an unplugged servo. The hood position is a **command estimate**, not measured physical position. Legacy replay logs without `OutputAvailable` retain the original allocated-output assumption; newer logs replay their recorded availability. Hardware reconnection/configuration and physical robot operation still require validation on the robot.
+
+To repeat the drive-only and partial-disconnection regressions:
+
+```powershell
+.\gradlew.bat test --tests frc.robot.DriveOnlySimulationTest --tests frc.robot.MissingMechanismTest --console=plain
+```
+
+The drive-only fixture uses actual robot lifecycle and drive physics with intake, indexer, shooter, hood, gyro and camera feedback absent. It checks teleop, shot-button interference, disable/teleop transitions, five auto selections on both alliances, and later drive phases after skipped scoring. Field2D traces are saved to `build/reports/simulation/drive-only-field-poses.csv`. Partial-disconnection checks exercise stale shooter/current readings, motor stopping, feedback recovery, the feeding interlock and disconnected-camera rejection.
+
 ## Commands v3: current state
 
 The robot runs the Commands v3 scheduler and uses `org.wpilib.command3` throughout its command code. There is no Commands v2 vendordep. Autonomous orchestration now uses **direct coroutine flows**: ordinary sequential statements, local timers and controllers, path awaits, bounded condition waits, and scoped concurrent children. `AutoRoutines` no longer uses `V3Commands`, sequence builders, or parallel/deadline groups. Some subsystem convenience commands and characterization recipes still use `V3Commands`; those execute on the same v3 scheduler.
@@ -154,6 +176,14 @@ Choose the alliance before starting autonomous. Alliance-flipped paths refuse to
 Hardware access belongs in hardware IO implementations; physics belongs in simulation IO. `Constants.currentMode` selects REAL on hardware and otherwise uses `Constants.simMode`, currently SIM. REPLAY uses an AdvantageKit log instead of live IO.
 
 REAL uses Pigeon2 and Limelight. Hood servos plug directly into SystemCore SmartIO PWM channels **0 and 1**. The configured period is 20 ms, with pulse endpoints of 600–2400 microseconds and a normalized 20–45° angle mapping. Verify calibration with the installed servos before hardware use. Preserve the existing CAN IDs, inversions, gearing, current limits, gains, and field conventions when modifying behavior.
+
+## Swerve SDK diagnostics
+
+REAL module IO records `phoenix6-status-observation-1` fields under `/Drive/Module0` through `/Drive/Module3`. It copies drive velocity and turn position once after the existing refreshes, logs those exact raw control-input values with individual/group SDK status and separate robot-nanosecond/Phoenix-second clock bookends, and retains primitive copies of all SDK timestamps. Receipt comparisons and repeated-value comparisons are separate; equal values do not establish staleness.
+
+These observations do not qualify physical acquisition freshness or native timestamp availability. Both qualification fields remain false; SIM and old REPLAY inputs keep unavailable defaults. No extra CAN refreshes, frame-rate changes, actuator requests or control conversions are introduced. Added logging/Java overhead still needs hardware measurement. The hub's [status/timing contract and bench worksheet](https://github.com/6391-Ursuline-Bearbotics/robot-test-hub/blob/main/docs/SWERVE_STATUS_TIMING.md) describe the exact semantics and limits.
+
+The Alpha 7/JDK 25 wrapper build passes with 56 tests, including drive-only and partial-disconnection regressions, ten SDK-copy/timing/AutoLog checks, and the existing simulation/recording/status/marker tests. This verifies compilation and local test behavior; no hardware deployment or operation has been performed.
 
 ## Dependencies
 

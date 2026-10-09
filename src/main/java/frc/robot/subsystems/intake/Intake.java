@@ -125,6 +125,7 @@ public class Intake implements Mechanism {
   // Roller jam detection
   private final Timer rollerJamTimer = new Timer();
   private boolean rollerJammed = false;
+  private boolean feedbackWasAvailable = true;
 
   // Alerts
   private final Alert deployDisconnectedAlert =
@@ -187,12 +188,12 @@ public class Intake implements Mechanism {
 
   @AutoLogOutput(key = "Intake/Deployed")
   public boolean isDeployed() {
-    return deployState == DeployState.DEPLOYED;
+    return isAvailable() && deployState == DeployState.DEPLOYED;
   }
 
   @AutoLogOutput(key = "Intake/Retracted")
   public boolean isRetracted() {
-    return deployState == DeployState.RETRACTED;
+    return isAvailable() && deployState == DeployState.RETRACTED;
   }
 
   @AutoLogOutput(key = "Intake/RollerVelocityRPM")
@@ -202,12 +203,18 @@ public class Intake implements Mechanism {
 
   /** Run roller at raw voltage for characterization. */
   public void runRollerCharacterization(double volts) {
-    rollerIO.setVoltage(volts);
+    if (isAvailable()) rollerIO.setVoltage(volts);
+    else rollerIO.stop();
   }
 
   /** Get roller velocity in rad/s for characterization. */
   public double getRollerCharacterizationVelocity() {
     return rollerInputs.velocityRadPerSec;
+  }
+
+  @AutoLogOutput(key = "Intake/Available")
+  public boolean isAvailable() {
+    return deployInputs.connected && rollerInputs.connected;
   }
 
   public void periodic() {
@@ -216,6 +223,28 @@ public class Intake implements Mechanism {
     Logger.processInputs("Intake/Deploy", deployInputs);
     rollerIO.updateInputs(rollerInputs);
     Logger.processInputs("Intake/Roller", rollerInputs);
+
+    org.wpilib.telemetry.Telemetry.log("Intake/Available", isAvailable());
+    if (!isAvailable()) {
+      feedbackWasAvailable = false;
+      deployIO.stop();
+      rollerIO.stop();
+      // Lost position/current feedback invalidates both hard-stop and jam state.
+      deployState = DeployState.RETRACTING;
+      positionCorrectionActive = false;
+      positionCorrectionGaveUp = false;
+      stallTimer.restart();
+      rehomeRequested = false;
+      rollerJammed = false;
+      rollerJamTimer.restart();
+      updateAlerts();
+      return;
+    }
+
+    if (!feedbackWasAvailable) {
+      deployIO.setBrakeMode(true);
+      feedbackWasAvailable = true;
+    }
 
     // Stop everything when disabled
     if (RobotState.isDisabled()) {
@@ -427,7 +456,7 @@ public class Intake implements Mechanism {
 
   @AutoLogOutput(key = "Intake/Roller/StatorCurrentAmps")
   public double getRollerStatorCurrentAmps() {
-    return rollerInputs.statorCurrentAmps;
+    return isAvailable() ? rollerInputs.statorCurrentAmps : 0;
   }
 
   @AutoLogOutput(key = "Intake/Roller/Jammed")

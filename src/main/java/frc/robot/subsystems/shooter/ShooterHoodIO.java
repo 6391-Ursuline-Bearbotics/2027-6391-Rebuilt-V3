@@ -5,6 +5,8 @@ import org.littletonrobotics.junction.AutoLog;
 public interface ShooterHoodIO {
   @AutoLog
   public static class ShooterHoodIOInputs {
+    /** Output allocated; PWM cannot detect an unplugged servo. Position is a command estimate. */
+    public boolean outputAvailable = false;
     public double positionDeg = 0.0;
   }
 
