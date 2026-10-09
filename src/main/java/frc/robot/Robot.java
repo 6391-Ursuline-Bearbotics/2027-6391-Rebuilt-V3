@@ -43,6 +43,11 @@ public class Robot extends LoggedRobot {
   }
 
   public Robot() {
+    this(RobotContainer::new);
+  }
+
+  /** Container injection for lifecycle simulation checks. */
+  public Robot(java.util.function.Supplier<RobotContainer> containerFactory) {
     // Fresh build/source identity and per-execution boot metadata.
     hubStatus.recordMetadata();
     var recordingDirectory = frc.robot.hub.RecordingOptions.directory(Constants.currentMode,
@@ -83,7 +88,7 @@ public class Robot extends LoggedRobot {
 
     // Instantiate our RobotContainer. This will perform all our button bindings,
     // and put our autonomous chooser on the dashboard.
-    robotContainer = new RobotContainer();
+    robotContainer = containerFactory.get();
     testHubMarkers = frc.robot.hub.TestHubMarkers.create(Constants.currentMode,
         hubStatus.robotId(), hubStatus.bootId(),
         Boolean.getBoolean("frc.testHubMarkersEnabled"),

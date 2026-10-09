@@ -7,6 +7,7 @@ public class ShooterHoodIOSim implements ShooterHoodIO {
 
   @Override
   public void updateInputs(ShooterHoodIOInputs inputs) {
+    inputs.outputAvailable = true;
     inputs.positionDeg = positionDeg;
   }
 

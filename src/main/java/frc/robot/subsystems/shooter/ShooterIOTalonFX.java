@@ -14,7 +14,6 @@ import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
-import org.wpilib.math.filter.Debouncer;
 import org.wpilib.math.util.Units;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
@@ -43,11 +42,6 @@ public class ShooterIOTalonFX implements ShooterIO {
   private final StatusSignal<Current> rightStatorCurrent;
   private final StatusSignal<Current> rightSupplyCurrent;
   private final StatusSignal<Temperature> rightTemp;
-
-  private final Debouncer leftConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
-  private final Debouncer rightConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   public ShooterIOTalonFX() {
     leftTalon = new TalonFX(ShooterConstants.leftMotorId, ShooterConstants.canBus);
@@ -126,14 +120,14 @@ public class ShooterIOTalonFX implements ShooterIO {
         BaseStatusSignal.refreshAll(
             rightVelocity, rightAppliedVolts, rightStatorCurrent, rightSupplyCurrent, rightTemp);
 
-    inputs.leftConnected = leftConnectedDebounce.calculate(leftStatus.isOK());
+    inputs.leftConnected = leftStatus.isOK();
     inputs.leftVelocityRadPerSec = Units.rotationsToRadians(leftVelocity.getValueAsDouble());
     inputs.leftAppliedVolts = leftAppliedVolts.getValueAsDouble();
     inputs.leftStatorCurrentAmps = leftStatorCurrent.getValueAsDouble();
     inputs.leftSupplyCurrentAmps = leftSupplyCurrent.getValueAsDouble();
     inputs.leftTempCelsius = leftTemp.getValueAsDouble();
 
-    inputs.rightConnected = rightConnectedDebounce.calculate(rightStatus.isOK());
+    inputs.rightConnected = rightStatus.isOK();
     inputs.rightVelocityRadPerSec = Units.rotationsToRadians(rightVelocity.getValueAsDouble());
     inputs.rightAppliedVolts = rightAppliedVolts.getValueAsDouble();
     inputs.rightStatorCurrentAmps = rightStatorCurrent.getValueAsDouble();

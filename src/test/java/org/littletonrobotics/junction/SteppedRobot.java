@@ -4,6 +4,12 @@ import frc.robot.Robot;
 
 /** Test-only access to the same AdvantageKit hooks used by LoggedRobot's main loop. */
 public final class SteppedRobot extends Robot {
+  public SteppedRobot() { super(); }
+
+  public SteppedRobot(java.util.function.Supplier<frc.robot.RobotContainer> factory) {
+    super(factory);
+  }
+
   public void step() {
     Logger.periodicBeforeUser();
     try {

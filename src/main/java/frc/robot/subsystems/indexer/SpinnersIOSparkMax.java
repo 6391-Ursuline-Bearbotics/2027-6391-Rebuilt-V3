@@ -8,7 +8,6 @@ import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkMaxConfig;
-import org.wpilib.math.filter.Debouncer;
 
 public class SpinnersIOSparkMax implements SpinnersIO {
   private final SparkMax leftMotor;
@@ -16,11 +15,8 @@ public class SpinnersIOSparkMax implements SpinnersIO {
   private final RelativeEncoder leftEncoder;
   private final RelativeEncoder rightEncoder;
 
-  private final Debouncer leftConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
-  private final Debouncer rightConnectedDebounce =
-      new Debouncer(0.5, Debouncer.DebounceType.FALLING);
-
+  private boolean leftConnected;
+  private boolean rightConnected;
   private int currentLimitAmps = IndexerConstants.spinnerCurrentLimitAmps;
 
   public SpinnersIOSparkMax() {
@@ -42,11 +38,23 @@ public class SpinnersIOSparkMax implements SpinnersIO {
 
   @Override
   public void updateInputs(SpinnersIOInputs inputs) {
-    // Connection detected by whether the motor responds without faults (no sticky faults = present)
-    boolean leftOk = leftMotor.getFaults().isValid() && !leftMotor.getFaults().get().can;
-    boolean rightOk = rightMotor.getFaults().isValid() && !rightMotor.getFaults().get().can;
-    inputs.leftConnected = leftConnectedDebounce.calculate(leftOk);
-    inputs.rightConnected = rightConnectedDebounce.calculate(rightOk);
+    // Require a valid response without a CAN fault; cached readings alone are insufficient.
+    var leftFaults = leftMotor.getFaults();
+    var rightFaults = rightMotor.getFaults();
+    boolean leftOk = leftFaults.isValid() && !leftFaults.get().can;
+    boolean rightOk = rightFaults.isValid() && !rightFaults.get().can;
+    inputs.leftConnected = leftOk;
+    inputs.rightConnected = rightOk;
+
+    // Reapply the desired runtime limit once when an optional spinner returns.
+    if (inputs.leftConnected && !leftConnected) {
+      applyConfig(leftMotor, true, PersistMode.kNoPersistParameters);
+    }
+    if (inputs.rightConnected && !rightConnected) {
+      applyConfig(rightMotor, false, PersistMode.kNoPersistParameters);
+    }
+    leftConnected = inputs.leftConnected;
+    rightConnected = inputs.rightConnected;
 
     inputs.leftVelocityRPM = leftEncoder.getVelocity().get(0.0);
     inputs.rightVelocityRPM = rightEncoder.getVelocity().get(0.0);
@@ -58,8 +66,8 @@ public class SpinnersIOSparkMax implements SpinnersIO {
 
   @Override
   public void setSpeed(double speed) {
-    leftMotor.setThrottle(speed);
-    rightMotor.setThrottle(speed);
+    leftMotor.setThrottle(leftConnected ? speed : 0);
+    rightMotor.setThrottle(rightConnected ? speed : 0);
   }
 
   @Override
@@ -73,7 +81,7 @@ public class SpinnersIOSparkMax implements SpinnersIO {
     if (amps == currentLimitAmps) return;
     currentLimitAmps = amps;
     // kNoPersistParameters avoids flash writes on dynamic runtime changes
-    applyConfig(leftMotor, true, PersistMode.kNoPersistParameters);
-    applyConfig(rightMotor, false, PersistMode.kNoPersistParameters);
+    if (leftConnected) applyConfig(leftMotor, true, PersistMode.kNoPersistParameters);
+    if (rightConnected) applyConfig(rightMotor, false, PersistMode.kNoPersistParameters);
   }
 }

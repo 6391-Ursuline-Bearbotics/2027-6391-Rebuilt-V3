@@ -10,7 +10,6 @@ import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
-import org.wpilib.math.filter.Debouncer;
 import org.wpilib.math.util.Units;
 import org.wpilib.units.measure.Angle;
 import org.wpilib.units.measure.AngularVelocity;
@@ -30,8 +29,6 @@ public class IntakeDeployIOTalonFX implements IntakeDeployIO {
   private final StatusSignal<Current> statorCurrent;
   private final StatusSignal<Current> supplyCurrent;
   private final StatusSignal<Temperature> temp;
-
-  private final Debouncer connectedDebounce = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   public IntakeDeployIOTalonFX() {
     talon = new TalonFX(IntakeConstants.deployMotorId, IntakeConstants.canBus);
@@ -65,7 +62,7 @@ public class IntakeDeployIOTalonFX implements IntakeDeployIO {
         BaseStatusSignal.refreshAll(
             position, velocity, appliedVolts, statorCurrent, supplyCurrent, temp);
 
-    inputs.connected = connectedDebounce.calculate(status.isOK());
+    inputs.connected = status.isOK();
     inputs.positionRad = Units.rotationsToRadians(position.getValueAsDouble());
     inputs.velocityRadPerSec = Units.rotationsToRadians(velocity.getValueAsDouble());
     inputs.appliedVolts = appliedVolts.getValueAsDouble();

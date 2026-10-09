@@ -12,7 +12,6 @@ import com.ctre.phoenix6.hardware.ParentDevice;
 import com.ctre.phoenix6.hardware.TalonFX;
 import com.ctre.phoenix6.signals.InvertedValue;
 import com.ctre.phoenix6.signals.NeutralModeValue;
-import org.wpilib.math.filter.Debouncer;
 import org.wpilib.math.util.Units;
 import org.wpilib.units.measure.AngularVelocity;
 import org.wpilib.units.measure.Current;
@@ -30,8 +29,6 @@ public class IndexerBeltIOTalonFX implements IndexerBeltIO {
   private final StatusSignal<Current> statorCurrent;
   private final StatusSignal<Current> supplyCurrent;
   private final StatusSignal<Temperature> temp;
-
-  private final Debouncer connectedDebounce = new Debouncer(0.5, Debouncer.DebounceType.FALLING);
 
   public IndexerBeltIOTalonFX() {
     talon = new TalonFX(IndexerConstants.beltMotorId, IndexerConstants.canBus);
@@ -64,7 +61,7 @@ public class IndexerBeltIOTalonFX implements IndexerBeltIO {
     var status =
         BaseStatusSignal.refreshAll(velocity, appliedVolts, statorCurrent, supplyCurrent, temp);
 
-    inputs.connected = connectedDebounce.calculate(status.isOK());
+    inputs.connected = status.isOK();
     inputs.velocityRadPerSec = Units.rotationsToRadians(velocity.getValueAsDouble());
     inputs.appliedVolts = appliedVolts.getValueAsDouble();
     inputs.statorCurrentAmps = statorCurrent.getValueAsDouble();

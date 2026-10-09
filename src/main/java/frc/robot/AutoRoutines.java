@@ -27,6 +27,8 @@ import frc.robot.subsystems.shooter.ShooterConstants;
 import frc.robot.subsystems.vision.Vision;
 import frc.robot.util.LoggedTunableNumber;
 import java.util.Optional;
+import java.util.function.Consumer;
+import org.wpilib.command3.Coroutine;
 import java.util.function.DoubleSupplier;
 import org.littletonrobotics.junction.Logger;
 
@@ -215,8 +217,12 @@ public class AutoRoutines {
       // Aiming, readiness/feeding, and intake work share the routine's lifetime.
       co.fork(driveTowardDepotAimingAtHub(0.5));
       co.fork(Command.noRequirements(feed -> {
-        feed.waitUntil(shooter::isAtSetpoint); // Preserve the original unbounded readiness wait.
-        feed.await(indexer.feedCommand());
+        feed.waitUntil(() -> shooter.isAtSetpoint() || !canScore());
+        if (canScore()) {
+          feed.fork(indexer.feedCommand());
+          feed.waitUntil(() -> !canScore());
+          indexer.setGoal(Indexer.Goal.IDLE);
+        }
       }).named("Wait For Moving Shot"));
       Command rehome = intake.periodicAutoRehomeCommand();
       co.fork(rehome);
@@ -240,10 +246,12 @@ public class AutoRoutines {
   public AutoRoutine shootOnly() {
     AutoRoutine routine = newRoutine("Shoot Only");
     routine.run(co -> {
-      shooter.setGoal(Shooter.Goal.SHOOT);
-      co.await(aimBackAtHub().withTimeout(Seconds.of(1.5)));
-      indexer.setGoal(Indexer.Goal.FEED);
-      co.await(intake.periodicAutoRehomeCommand().withTimeout(Seconds.of(10)));
+      co.await(scoringPhase("Shoot Only", shot -> {
+        shooter.setGoal(Shooter.Goal.SHOOT);
+        shot.await(aimBackAtHub().withTimeout(Seconds.of(1.5)));
+        indexer.setGoal(Indexer.Goal.FEED);
+        shot.await(intake.periodicAutoRehomeCommand().withTimeout(Seconds.of(10)));
+      }));
       stopShooting();
     });
     return routine;
@@ -455,12 +463,12 @@ public class AutoRoutines {
       co.await(back.cmd());
       co.await(sprintToPose(back.getFinalPose().orElse(new Pose2d())).withTimeout(Seconds.of(2)));
       // The shooting scope ends after its 1 s settle and 10 s rehome/feed phase.
-      co.await(Command.noRequirements(shot -> {
+      co.await(scoringPhase("Return Shot", shot -> {
         shot.fork(aimBackAtHubWithVisionCreep());
         shot.wait(Seconds.of(1));
         indexer.setGoal(Indexer.Goal.FEED);
         shot.await(intake.periodicAutoRehomeCommand().withTimeout(Seconds.of(10)));
-      }).named("Return Shot"));
+      }));
       stopShooting();
       intake.setGoal(Intake.Goal.INTAKE);
       co.await(bump.cmd());
@@ -481,9 +489,11 @@ public class AutoRoutines {
       if (shootFirst) co.await(shootFirstPreloadCommand());
       intake.setGoal(Intake.Goal.INTAKE);
       co.await(path.cmd());
-      co.await(aimBackAtHub().withTimeout(Seconds.of(1)));
-      indexer.setGoal(Indexer.Goal.FEED);
-      co.await(intake.periodicAutoRehomeCommand().withTimeout(Seconds.of(10)));
+      co.await(scoringPhase("Safe Shot", shot -> {
+        shot.await(aimBackAtHub().withTimeout(Seconds.of(1)));
+        indexer.setGoal(Indexer.Goal.FEED);
+        shot.await(intake.periodicAutoRehomeCommand().withTimeout(Seconds.of(10)));
+      }));
       stopShooting();
       intake.setGoal(Intake.Goal.IDLE);
     });
@@ -598,10 +608,12 @@ public class AutoRoutines {
     return Command.noRequirements(co -> {
       double minimumDelay = readShootFirstDelaySecs();
       Timer elapsed = Timer.createStarted();
-      shooter.setGoal(Shooter.Goal.SHOOT);
-      co.await(aimBackAtHub().withTimeout(Seconds.of(1.5)));
-      indexer.setGoal(Indexer.Goal.FEED);
-      co.wait(Seconds.of(1));
+      co.await(scoringPhase("Preload Feed", shot -> {
+        shooter.setGoal(Shooter.Goal.SHOOT);
+        shot.await(aimBackAtHub().withTimeout(Seconds.of(1.5)));
+        indexer.setGoal(Indexer.Goal.FEED);
+        shot.wait(Seconds.of(1));
+      }));
       stopShooting();
       // Delay and shot share one start time: never add the full delay after the shot.
       co.waitUntil(() -> elapsed.hasElapsed(minimumDelay));
@@ -619,6 +631,22 @@ public class AutoRoutines {
     return routine;
   }
 
+  private boolean canScore() {
+    return shooter.isAvailable() && indexer.isAvailable();
+  }
+
+  /** Skip absent scoring hardware and cancel all scoped children if feedback is lost mid-shot. */
+  private Command scoringPhase(String name, Consumer<Coroutine> body) {
+    return Command.noRequirements(co -> {
+      boolean available = canScore();
+      Logger.recordOutput("Auto/ScoringPhaseSkipped", !available);
+      if (available) {
+        co.await(Command.noRequirements(body).until(() -> !canScore()).named(name));
+      }
+      if (!canScore()) stopShooting();
+    }).whenCanceled(this::stopShooting).named(name + " With Availability");
+  }
+
   private void stopShooting() {
     shooter.setGoal(Shooter.Goal.IDLE);
     indexer.setGoal(Indexer.Goal.IDLE);
@@ -631,7 +659,7 @@ public class AutoRoutines {
 
   /** A scope whose aiming/rehome children end as soon as its shooting timeline returns. */
   private Command staticShot(Timer autoTimer) {
-    return Command.noRequirements(co -> {
+    return scoringPhase("Static Shot", co -> {
       co.fork(aimBackAtHubWithVisionCreep(), intake.periodicAutoRehomeCommand());
       Debouncer aimed = new Debouncer(0.5, DebounceType.RISING);
       var readiness = co.waitUntil(() -> aimed.calculate(isAimedAtHub()), Seconds.of(2));
@@ -640,6 +668,6 @@ public class AutoRoutines {
       indexer.setGoal(Indexer.Goal.FEED);
       co.wait(Seconds.of(shootDurationSecs.get()));
       if (autoTimer != null) co.waitUntil(() -> autoTimer.get() >= bumpRushAutoTimeSecs.get());
-    }).named("Static Shot");
+    });
   }
 }

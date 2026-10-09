@@ -17,6 +17,7 @@ public class ShooterHoodIOServo implements ShooterHoodIO, AutoCloseable {
 
   @Override
   public void updateInputs(ShooterHoodIOInputs inputs) {
+    inputs.outputAvailable = true;
     inputs.positionDeg = commandedAngleDeg;
   }
 

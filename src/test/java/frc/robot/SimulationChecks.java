@@ -42,7 +42,9 @@ public final class SimulationChecks implements AutoCloseable {
   private final List<String> rows = new ArrayList<>(List.of(
       "scenario,alliance,time,actual_x,actual_y,actual_heading,expected_x,expected_y,expected_heading,error_m"));
 
-  private SimulationChecks(boolean playback) {
+  private SimulationChecks(boolean playback) { this(playback, false); }
+
+  private SimulationChecks(boolean playback, boolean missingMechanisms) {
     this.playback = playback;
     if (!playback) {
       for (String name : List.of("networktables.json", "networktables.json.bck")) {
@@ -59,7 +61,7 @@ public final class SimulationChecks implements AutoCloseable {
     DriverStationSim.resetData();
     DriverStationSim.setDsAttached(true);
     DriverStationSim.setSendError(playback);
-    robot = new SteppedRobot();
+    robot = new SteppedRobot(() -> new RobotContainer(missingMechanisms));
     container = ((Robot) robot).getContainer();
     if (!playback) {
       // Headless checks must not save their temporary tuning values as operator preferences.
@@ -273,6 +275,81 @@ public final class SimulationChecks implements AutoCloseable {
         (org.junit.jupiter.api.function.Executable) () -> { throw failure; }));
   }
 
+
+  /** The real lifecycle and drive physics must remain usable with every optional IO absent. */
+  public static void runDriveOnly() throws Exception {
+    try (var checks = new SimulationChecks(false, true)) {
+      for (boolean red : new boolean[] {false, true}) {
+        checks.teleop(red);
+        for (String name : List.of("Depot Cycle", "Depot Inside", "Safe")) {
+          checks.auto(name, name.replace(" ", ""), false, red);
+        }
+        checks.auto("Trench Depot Points", "TrenchOutpostPoints", true, red);
+        checks.auto("Safe (Shoot First)", "Safe", false, red);
+        // Check later paths too: skipping a score must not terminate the parent routine.
+        for (var entry : Map.of(
+            "Trench Depot Points", "Follow DepotBump",
+            "Trench Depot Follow", "Follow OutpostStagingGather",
+            "Depot Double Pass", "Follow DepotBump",
+            "Depot Single Pass Shoot On Move", "Moving Shot Drive").entrySet()) {
+          checks.mode(RobotMode.AUTONOMOUS, false, red);
+          var nt = NetworkTableInstance.getDefault();
+          nt.getEntry("/Tunables/Autonomous/Chooser/selected/tune").setString(entry.getKey());
+          nt.flushLocal();
+          nt.waitForListenerQueue(1);
+          checks.ticks(0.1);
+          checks.mode(RobotMode.AUTONOMOUS, true, red);
+          int starts = 0;
+          boolean previouslyRunning = false;
+          for (int cycle = 0; cycle < 2000; cycle++) {
+            checks.tick();
+            assertFalse(checks.container.getShooter().isAvailable());
+            assertFalse(checks.container.getShooter().isAtSetpoint());
+            assertFalse(checks.container.getIntake().isAvailable());
+            assertFalse(checks.container.getIndexer().isAvailable());
+            assertNotEquals(frc.robot.subsystems.indexer.Indexer.Goal.FEED,
+                checks.container.getIndexer().getGoal(), "Absent scoring hardware must never feed");
+            boolean running = Scheduler.getDefault().getRunningCommands().stream()
+                .anyMatch(command -> command.name().equals(entry.getValue()));
+            if (running && !previouslyRunning) starts++;
+            previouslyRunning = running;
+          }
+          int expectedStarts = entry.getKey().equals("Depot Double Pass") ? 2 : 1;
+          assertTrue(starts >= expectedStarts, entry.getKey() + " must reach "
+              + entry.getValue() + " " + expectedStarts + " time(s), saw " + starts);
+          checks.mode(RobotMode.AUTONOMOUS, false, red);
+          checks.ticks(0.2);
+          assertTrue(Scheduler.getDefault().getRunningCommands().stream()
+              .noneMatch(command -> command.name().contains("Moving Shot Drive")
+                  || command.name().contains("Aim With Vision Creep")));
+        }
+        // Held shot buttons and hood positioning cannot seize manual drive on a bare chassis.
+        checks.neutral();
+        checks.mode(RobotMode.TELEOPERATED, true, red);
+        checks.container.getDrive().setPose(new Pose2d(8, 4, Rotation2d.ZERO));
+        checks.joystick.setAButton(true);
+        checks.joystick.setXButton(true);
+        checks.joystick.setLeftTriggerAxis(1);
+        checks.joystick.setRightBumperButton(true);
+        checks.joystick.setLeftY(-0.6);
+        checks.joystick.setRightX(-0.4);
+        Pose2d start = checks.container.getDrive().getPose();
+        checks.ticks(1);
+        assertTrue(start.getTranslation().getDistance(checks.container.getDrive().getPose()
+            .getTranslation()) > 0.5, "Shot controls must leave manual translation available");
+        assertTrue(Math.abs(start.getRotation().minus(checks.container.getDrive().getRotation())
+            .getRadians()) > 0.25, "Shot controls must leave manual rotation available");
+        checks.joystick.setAButton(false);
+        checks.joystick.setXButton(false);
+        checks.joystick.setLeftTriggerAxis(0);
+        checks.joystick.setRightBumperButton(false);
+        checks.neutral();
+        checks.mode(RobotMode.TELEOPERATED, false, red);
+      }
+      Files.createDirectories(Path.of("build/reports/simulation"));
+      Files.write(Path.of("build/reports/simulation/drive-only-field-poses.csv"), checks.rows);
+    }
+  }
 
   public static void main(String[] args) throws Exception {
     run(true);

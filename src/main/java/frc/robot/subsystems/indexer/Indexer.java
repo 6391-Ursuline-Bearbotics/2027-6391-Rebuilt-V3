@@ -148,6 +148,19 @@ public class Indexer implements Mechanism {
     return goal;
   }
 
+  private java.util.function.BooleanSupplier feedAvailable = () -> true;
+
+  /** Interlock feeding with live shooter availability; eject remains independent. */
+  public void setFeedAvailableSupplier(java.util.function.BooleanSupplier available) {
+    feedAvailable = available;
+  }
+
+  /** Belt and kicker are required; auxiliary spinners report their own connection status. */
+  @AutoLogOutput(key = "Indexer/Available")
+  public boolean isAvailable() {
+    return beltInputs.connected && kickerInputs.connected;
+  }
+
   public void periodic() {
     // Update and log inputs
     beltIO.updateInputs(beltInputs);
@@ -158,7 +171,11 @@ public class Indexer implements Mechanism {
     Logger.processInputs("Indexer/Spinners", spinnersInputs);
 
     // Stop everything when disabled and reset spinner state so it re-initializes cleanly on enable
-    if (RobotState.isDisabled()) {
+    org.wpilib.telemetry.Telemetry.log("Indexer/Available", isAvailable());
+    if (RobotState.isDisabled() || !isAvailable()
+        || (goal == Goal.FEED && !feedAvailable.getAsBoolean())) {
+      jammed = false;
+      jamTimer.restart();
       beltIO.stop();
       kickerIO.stop();
       spinnersIO.stop();

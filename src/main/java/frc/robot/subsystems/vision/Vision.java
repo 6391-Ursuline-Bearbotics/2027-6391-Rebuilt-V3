@@ -141,6 +141,7 @@ public class Vision implements Mechanism {
                   || observation.pose().getY() > aprilTagLayout.getFieldWidth();
         }
 
+        rejectPose |= !inputs[cameraIndex].connected;
         // Add pose to log
         robotPoses.add(observation.pose());
         if (rejectPose) {
@@ -199,7 +200,7 @@ public class Vision implements Mechanism {
           "Vision/Camera" + Integer.toString(cameraIndex) + "/RobotPosesRejected",
           robotPosesRejected.toArray(new Pose3d[0]));
       // Refresh tag-seen timestamp whenever this camera has fresh tag data
-      if (inputs[cameraIndex].tagIds.length > 0) {
+      if (inputs[cameraIndex].connected && inputs[cameraIndex].tagIds.length > 0) {
         lastTagSeenTimestamp = Timer.getTimestamp();
       }
 

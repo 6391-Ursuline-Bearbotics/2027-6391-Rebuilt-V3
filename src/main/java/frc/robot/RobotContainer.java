@@ -91,7 +91,7 @@ public class RobotContainer {
   private final Indexer indexer;
   private final Shooter shooter;
 
-  // Set to false to use no-op IO when hardware is not connected
+  // Legacy manual overrides. Missing-device tolerance does not require changing these.
   private static final boolean indexerEnabled = true;
   private static final boolean shooterEnabled = true;
 
@@ -111,6 +111,14 @@ public class RobotContainer {
   private DriveMode currentDriveMode = DriveMode.STANDARD;
 
   public RobotContainer() {
+    this(false);
+  }
+
+  /** Test fixture: drive physics with absent optional mechanism IO. */
+  RobotContainer(boolean missingMechanisms) {
+    if (missingMechanisms && Constants.currentMode != Constants.Mode.SIM) {
+      throw new IllegalArgumentException("Missing-mechanism fixture requires simulation");
+    }
     switch (Constants.currentMode) {
       case REAL:
         // Real robot, instantiate hardware IO implementations
@@ -180,18 +188,21 @@ public class RobotContainer {
         vision =
             new Vision(
                 drive::addVisionMeasurement,
-                new VisionIOPhotonVisionSim(camera0Name, robotToCamera0, drive::getSimulationPose));
-        intake = new Intake(new IntakeDeployIOSim(), new IntakeRollerIOSim());
+                missingMechanisms ? new VisionIO() {}
+                    : new VisionIOPhotonVisionSim(camera0Name, robotToCamera0, drive::getSimulationPose));
+        intake = new Intake(
+            missingMechanisms ? new IntakeDeployIO() {} : new IntakeDeployIOSim(),
+            missingMechanisms ? new IntakeRollerIO() {} : new IntakeRollerIOSim());
         indexer =
             new Indexer(
-                new IndexerBeltIOSim(),
-                new IndexerKickerIOSim(),
+                missingMechanisms ? new IndexerBeltIO() {} : new IndexerBeltIOSim(),
+                missingMechanisms ? new IndexerKickerIO() {} : new IndexerKickerIOSim(),
                 new SpinnersIO() {},
                 drive::getPose);
         shooter =
             new Shooter(
-                new ShooterIOSim(),
-                new ShooterHoodIOSim(),
+                missingMechanisms ? new ShooterIO() {} : new ShooterIOSim(),
+                missingMechanisms ? new ShooterHoodIO() {} : new ShooterHoodIOSim(),
                 drive::getPose,
                 drive::getFieldRelativeSpeeds,
                 () -> indexer.getGoal() == Indexer.Goal.FEED,
@@ -221,7 +232,13 @@ public class RobotContainer {
         shooter =
             new Shooter(
                 new ShooterIO() {},
-                new ShooterHoodIO() {},
+                new ShooterHoodIO() {
+                  @Override
+                  public void updateInputs(ShooterHoodIOInputs inputs) {
+                    // Legacy replay records a commanded angle, not physical servo feedback.
+                    inputs.outputAvailable = true;
+                  }
+                },
                 drive::getPose,
                 drive::getFieldRelativeSpeeds,
                 () -> indexer.getGoal() == Indexer.Goal.FEED,
@@ -295,7 +312,12 @@ public class RobotContainer {
           "Shooter FF Characterization", () -> Shooter.shooterFFCharacterization(shooter));
     }
 
+    indexer.setFeedAvailableSupplier(shooter::isAvailable);
     configureButtonBindings();
+  }
+
+  private boolean canScore() {
+    return shooter.isAvailable() && indexer.isAvailable();
   }
 
   private void configureButtonBindings() {
@@ -317,6 +339,12 @@ public class RobotContainer {
                   }
                 })
             .named("Drive Default"));
+
+    new Trigger(() -> !shooter.isAvailable()).onTrue(Command.noRequirements(co -> {
+      currentDriveMode = DriveMode.STANDARD;
+      autoAimGyrating = false;
+      indexer.setGoal(Indexer.Goal.IDLE);
+    }).named("Release Unavailable Shooter Aim"));
 
     // B: return to standard drive mode
     drv.b()
@@ -344,6 +372,7 @@ public class RobotContainer {
         .onTrue(
             Command.noRequirements(
                     co -> {
+                      if (!shooter.isAvailable()) return;
                       currentDriveMode = DriveMode.AIM_TARGET;
                       aimTargetController.reset(drive.getRotation().getRadians());
                       shooter.setGoal(Shooter.Goal.SHOOT);
@@ -354,10 +383,11 @@ public class RobotContainer {
     drv.x()
         .onTrue(
             Command.noRequirements(co -> {
+              if (!shooter.isAvailable()) return;
               shooter.setGoal(Shooter.Goal.SHOOT);
               co.await(aimAtHub().withTimeout(Seconds.of(1.0)));
               co.await(drive.run(lock -> drive.stopWithX()).named("Lock X"));
-            }).named("Aim Then Lock X"));
+            }).until(() -> !shooter.isAvailable()).named("Aim Then Lock X"));
 
     // Start: reset gyro yaw to zero (field-forward)
     drv.start()
@@ -374,7 +404,8 @@ public class RobotContainer {
             Command.noRequirements(co -> {
               shooter.setGoal(Shooter.Goal.IDLE);
               shooter.setHoodAngle(26.0);
-              co.waitUntil(() -> shooter.isHoodAtAngle(26.0, 1.0));
+              co.waitUntil(() -> !shooter.isHoodOutputAvailable() || shooter.isHoodAtAngle(26.0, 1.0),
+                  Seconds.of(2));
             }).named("Idle Shooter And Position Hood"));
 
     // Operator intake controls
@@ -394,6 +425,7 @@ public class RobotContainer {
         .whileTrue(
             Command.noRequirements(
                     co -> {
+                      if (!intake.isAvailable()) return;
                       intake.setGoal(Intake.Goal.CLUMP_INTAKE);
                       drive.setMaxSpeedOverride(2.0);
                       co.park();
@@ -403,13 +435,14 @@ public class RobotContainer {
                       intake.setGoal(Intake.Goal.INTAKE);
                       drive.clearMaxSpeedOverride();
                     })
-                .named("Clump Intake"));
+                .until(() -> !intake.isAvailable()).named("Clump Intake"));
 
     // Operator left trigger (held): ungated feed + auto-spinup + adaptive intake rehome
     op.leftTrigger(0.5)
         .whileTrue(
             Command.noRequirements(
                     co -> {
+                      if (!canScore()) return;
                       boolean isRed =
                           MatchState.getAlliance().isPresent()
                               && MatchState.getAlliance().get() == Alliance.RED;
@@ -421,7 +454,7 @@ public class RobotContainer {
                       co.park();
                     })
                 .whenCanceled(() -> indexer.setGoal(Indexer.Goal.IDLE))
-                .named("Op Left Trigger Feed")
+                .until(() -> !canScore()).named("Op Left Trigger Feed")
                 .alongWith(intakeWithMotionAdaptiveRehome())
                 .withAutomaticName());
 
@@ -430,6 +463,7 @@ public class RobotContainer {
         .whileTrue(
             Command.noRequirements(
                     co -> {
+                      if (!canScore()) return;
                       shooter.setGoal(Shooter.Goal.SHOOT);
                       currentDriveMode = DriveMode.AIM_TARGET;
                       aimTargetController.reset(drive.getRotation().getRadians());
@@ -447,7 +481,7 @@ public class RobotContainer {
                       intake.setGoal(Intake.Goal.IDLE);
                       indexer.setGoal(Indexer.Goal.IDLE);
                     })
-                .named("Gated Auto Shot"));
+                .until(() -> !canScore()).named("Gated Auto Shot"));
 
     // Operator right bumper: stop shooter and return to standard drive
     op.rightBumper()
@@ -465,6 +499,7 @@ public class RobotContainer {
         .whileTrue(
             Command.noRequirements(
                     co -> {
+                      if (!canScore()) return;
                       boolean isRed =
                           MatchState.getAlliance().isPresent()
                               && MatchState.getAlliance().get() == Alliance.RED;
@@ -486,7 +521,7 @@ public class RobotContainer {
                       autoAimGyrating = false;
                       indexer.setGoal(Indexer.Goal.IDLE);
                     })
-                .named("Auto Aim and Feed")
+                .until(() -> !canScore()).named("Auto Aim and Feed")
                 .alongWith(rehomeOnly())
                 .withAutomaticName());
 
@@ -892,6 +927,7 @@ public class RobotContainer {
    * selection or alliance changes.
    */
   public void updateFieldVisualizations() {
+    org.wpilib.telemetry.Telemetry.log("Autonomous/ScoringAvailable", canScore());
     drive.publishField();
     String name = autoChooser.selectedName();
     boolean red = MatchState.getAlliance().orElse(Alliance.BLUE) == Alliance.RED;
